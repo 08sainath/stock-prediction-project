@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -15,186 +16,157 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Indian NSE stocks only. Yahoo Finance uses .NS for NSE symbols.
 STOCKS = {
-    "RELIANCE.NS":("RELIANCE","Reliance Industries"), "TCS.NS":("TCS","Tata Consultancy Services"),
-    "INFY.NS":("INFY","Infosys"), "HDFCBANK.NS":("HDFCBANK","HDFC Bank"),
-    "ICICIBANK.NS":("ICICIBANK","ICICI Bank"), "SBIN.NS":("SBIN","State Bank of India"),
-    "ITC.NS":("ITC","ITC Limited"), "BHARTIARTL.NS":("BHARTIARTL","Bharti Airtel"),
-    "LT.NS":("LT","Larsen & Toubro"), "WIPRO.NS":("WIPRO","Wipro"),
-    "HCLTECH.NS":("HCLTECH","HCL Technologies"), "MARUTI.NS":("MARUTI","Maruti Suzuki India"),
-    "SUNPHARMA.NS":("SUNPHARMA","Sun Pharmaceutical"), "TATASTEEL.NS":("TATASTEEL","Tata Steel"),
-    "TATAMOTORS.NS":("TATAMOTORS","Tata Motors"), "BAJFINANCE.NS":("BAJFINANCE","Bajaj Finance"),
-    "AXISBANK.NS":("AXISBANK","Axis Bank"), "KOTAKBANK.NS":("KOTAKBANK","Kotak Mahindra Bank"),
-    "ASIANPAINT.NS":("ASIANPAINT","Asian Paints"), "TITAN.NS":("TITAN","Titan Company"),
-    "ADANIENT.NS":("ADANIENT","Adani Enterprises"), "ADANIPORTS.NS":("ADANIPORTS","Adani Ports"),
-    "NTPC.NS":("NTPC","NTPC Limited"), "POWERGRID.NS":("POWERGRID","Power Grid Corporation"),
-    "ONGC.NS":("ONGC","Oil & Natural Gas Corporation"), "COALINDIA.NS":("COALINDIA","Coal India"),
-    "BEL.NS":("BEL","Bharat Electronics"), "HAL.NS":("HAL","Hindustan Aeronautics"),
-    "IRFC.NS":("IRFC","Indian Railway Finance Corporation"), "IREDA.NS":("IREDA","Indian Renewable Energy Development Agency")
+    "RELIANCE.NS":("RELIANCE","Reliance Industries"), "TCS.NS":("TCS","Tata Consultancy Services"), "INFY.NS":("INFY","Infosys"), "HDFCBANK.NS":("HDFCBANK","HDFC Bank"), "ICICIBANK.NS":("ICICIBANK","ICICI Bank"), "SBIN.NS":("SBIN","State Bank of India"), "ITC.NS":("ITC","ITC Limited"), "BHARTIARTL.NS":("BHARTIARTL","Bharti Airtel"), "LT.NS":("LT","Larsen & Toubro"), "WIPRO.NS":("WIPRO","Wipro"), "HCLTECH.NS":("HCLTECH","HCL Technologies"), "MARUTI.NS":("MARUTI","Maruti Suzuki India"), "SUNPHARMA.NS":("SUNPHARMA","Sun Pharmaceutical"), "TATASTEEL.NS":("TATASTEEL","Tata Steel"), "TATAMOTORS.NS":("TATAMOTORS","Tata Motors"), "BAJFINANCE.NS":("BAJFINANCE","Bajaj Finance"), "AXISBANK.NS":("AXISBANK","Axis Bank"), "KOTAKBANK.NS":("KOTAKBANK","Kotak Mahindra Bank"), "ASIANPAINT.NS":("ASIANPAINT","Asian Paints"), "TITAN.NS":("TITAN","Titan Company"), "ADANIENT.NS":("ADANIENT","Adani Enterprises"), "ADANIPORTS.NS":("ADANIPORTS","Adani Ports"), "NTPC.NS":("NTPC","NTPC Limited"), "POWERGRID.NS":("POWERGRID","Power Grid Corporation"), "ONGC.NS":("ONGC","Oil & Natural Gas Corporation"), "COALINDIA.NS":("COALINDIA","Coal India"), "BEL.NS":("BEL","Bharat Electronics"), "HAL.NS":("HAL","Hindustan Aeronautics"), "IRFC.NS":("IRFC","Indian Railway Finance Corporation"), "IREDA.NS":("IREDA","Indian Renewable Energy Development Agency")
 }
+
 INDICES = {"^NSEI":("NIFTY 50","NIFTY 50"), "^NSEBANK":("BANK NIFTY","NIFTY Bank"), "^BSESN":("SENSEX","BSE SENSEX")}
 
 
-def number(v):
+def _number(value):
     try:
-        v=float(v)
-        return v if np.isfinite(v) else None
+        value = float(value)
+        return value if np.isfinite(value) else None
     except Exception:
         return None
-
-
-def _quote_from_frame(frame):
-    if frame is None or frame.empty or "Close" not in frame.columns:
-        return None
-    close=frame["Close"].dropna()
-    if close.empty:
-        return None
-    price=number(close.iloc[-1])
-    previous=number(close.iloc[-2]) if len(close)>1 else None
-    high=number(frame["High"].dropna().iloc[-1]) if "High" in frame and not frame["High"].dropna().empty else None
-    low=number(frame["Low"].dropna().iloc[-1]) if "Low" in frame and not frame["Low"].dropna().empty else None
-    volume=number(frame["Volume"].dropna().iloc[-1]) if "Volume" in frame and not frame["Volume"].dropna().empty else None
-    change=price-previous if price is not None and previous is not None else None
-    pct=change/previous*100 if change is not None and previous else None
-    return {"price":price,"previous":previous,"change":change,"change_pct":pct,"high":high,"low":low,"volume":volume}
 
 
 @st.cache_data(ttl=15, show_spinner=False)
-def get_live_quotes(tickers):
-    """Batch Yahoo Finance request. This avoids one request per ticker and reduces Yahoo rate-limit/API errors."""
-    tickers=tuple(tickers)
-    result={}
-    if not tickers:
-        return result
+def yahoo_chart_quote(ticker):
+    """Fallback quote reader using Yahoo's chart endpoint; avoids yfinance ticker/crumb parsing errors."""
     try:
-        data=yf.download(list(tickers), period="1d", interval="1m", auto_adjust=False, progress=False, threads=True, group_by="ticker")
-        for ticker in tickers:
-            try:
-                if isinstance(data.columns, pd.MultiIndex):
-                    if ticker in data.columns.get_level_values(0):
-                        frame=data[ticker]
-                    elif ticker in data.columns.get_level_values(1):
-                        frame=data.xs(ticker, axis=1, level=1)
-                    else:
-                        frame=None
-                else:
-                    frame=data if len(tickers)==1 else None
-                q=_quote_from_frame(frame)
-                if q:
-                    result[ticker]=q
-            except Exception:
-                continue
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        response = requests.get(url, params={"range":"1d", "interval":"1m", "includePrePost":"false"}, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+        result = payload.get("chart", {}).get("result") or []
+        if not result:
+            return None
+        meta = result[0].get("meta", {})
+        price = _number(meta.get("regularMarketPrice"))
+        previous = _number(meta.get("previousClose")) or _number(meta.get("chartPreviousClose"))
+        high = _number(meta.get("regularMarketDayHigh"))
+        low = _number(meta.get("regularMarketDayLow"))
+        if price is None:
+            quote = (result[0].get("indicators", {}).get("quote") or [{}])[0]
+            closes = [x for x in quote.get("close", []) if x is not None]
+            if closes:
+                price = _number(closes[-1])
+        change = price - previous if price is not None and previous else None
+        change_pct = change / previous * 100 if change is not None and previous else None
+        return {"price":price,"previous":previous,"change":change,"change_pct":change_pct,"high":high,"low":low}
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def get_live_quote(ticker):
+    """Use yfinance first, then Yahoo chart API as a reliable fallback."""
+    try:
+        t = yf.Ticker(ticker)
+        info = t.fast_info
+        price = _number(info.get("last_price"))
+        previous = _number(info.get("previous_close"))
+        high = _number(info.get("day_high"))
+        low = _number(info.get("day_low"))
+        if price is not None:
+            change = price - previous if previous else None
+            change_pct = change / previous * 100 if change is not None and previous else None
+            return {"price":price,"previous":previous,"change":change,"change_pct":change_pct,"high":high,"low":low}
     except Exception:
         pass
-    return result
+    return yahoo_chart_quote(ticker)
 
 
 @st.cache_data(ttl=120, show_spinner=False)
 def get_history(ticker, period="1y"):
     try:
-        df=yf.download(ticker, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+        df = yf.download(ticker, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
         if df is None or df.empty:
             return pd.DataFrame()
-        if isinstance(df.columns,pd.MultiIndex):
-            df=df.xs(ticker,axis=1,level=1) if ticker in df.columns.get_level_values(1) else df.droplevel(1,axis=1)
-        df.columns=[str(c).lower() for c in df.columns]
-        cols=[c for c in ["open","high","low","close","volume"] if c in df.columns]
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).lower() for c in df.columns]
+        cols = [c for c in ["open","high","low","close","volume"] if c in df.columns]
         return df[cols].dropna(subset=["close"])
     except Exception:
         return pd.DataFrame()
 
 
 def rsi(series, period=14):
-    delta=series.diff(); gain=delta.clip(lower=0).rolling(period).mean(); loss=(-delta.clip(upper=0)).rolling(period).mean()
-    rs=gain/loss.replace(0,np.nan)
-    return 100-100/(1+rs)
+    delta = series.diff(); gain = delta.clip(lower=0).rolling(period).mean(); loss = (-delta.clip(upper=0)).rolling(period).mean(); rs = gain / loss.replace(0, np.nan)
+    return 100 - 100 / (1 + rs)
 
 
 def indicators(df):
-    df=df.copy(); df["sma20"]=df.close.rolling(20).mean(); df["sma50"]=df.close.rolling(50).mean()
-    df["rsi"]=rsi(df.close); df["momentum20"]=df.close.pct_change(20)*100
-    df["volatility"]=df.close.pct_change().rolling(20).std()*np.sqrt(252)*100
+    df = df.copy(); df["sma20"] = df.close.rolling(20).mean(); df["sma50"] = df.close.rolling(50).mean(); df["rsi"] = rsi(df.close); df["momentum20"] = df.close.pct_change(20) * 100; df["volatility"] = df.close.pct_change().rolling(20).std() * np.sqrt(252) * 100
     return df
 
 
 def signal(df):
-    if df.empty:return "HOLD"
-    last=df.iloc[-1]; score=0
-    if pd.notna(last.sma20): score+=1 if last.close>last.sma20 else -1
-    if pd.notna(last.sma50): score+=1 if last.close>last.sma50 else -1
+    if df.empty: return "HOLD"
+    last = df.iloc[-1]; score = 0
+    if pd.notna(last.sma20): score += 1 if last.close > last.sma20 else -1
+    if pd.notna(last.sma50): score += 1 if last.close > last.sma50 else -1
     if pd.notna(last.rsi):
-        if last.rsi<35:score+=2
-        elif last.rsi>70:score-=2
-    return "BUY" if score>=2 else "SELL" if score<=-2 else "HOLD"
+        if last.rsi < 35: score += 2
+        elif last.rsi > 70: score -= 2
+    return "BUY" if score >= 2 else "SELL" if score <= -2 else "HOLD"
 
 
-def money(v): return "₹—" if v is None or pd.isna(v) else f"₹{v:,.2f}"
+def money(v): return "₹—" if v is None else f"₹{v:,.2f}"
 
-st.markdown('<div class="brand">SMA</div><div class="muted">STOCK MARKET ANALYSIS · INDIAN MARKETS</div>',unsafe_allow_html=True)
-st.markdown('<div class="hero"><h1>Indian Stock Market Analysis</h1><p class="muted">Yahoo Finance market data, technical indicators and estimated price analysis.</p></div>',unsafe_allow_html=True)
+st.markdown('<div class="brand">SMA</div><div class="muted">STOCK MARKET ANALYSIS · INDIAN MARKETS</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero"><h1>Indian Stock Market Analysis</h1><p class="muted">Live NSE prices from Yahoo Finance, technical indicators and estimated price analysis.</p></div>', unsafe_allow_html=True)
+page = st.radio("Navigation", ["Market Overview", "Stock Analysis", "All Stocks"], horizontal=True, label_visibility="collapsed")
 
-page=st.radio("Navigation",["Market Overview","Stock Analysis","All Stocks"],horizontal=True,label_visibility="collapsed")
-
-# Only one batched Yahoo request for the three indices.
-index_quotes=get_live_quotes(tuple(INDICES.keys()))
 st.subheader("Live Market")
-cols=st.columns(3)
-for col,(ticker,(symbol,name)) in zip(cols,INDICES.items()):
-    q=index_quotes.get(ticker)
+cols = st.columns(3)
+for col, (ticker, (symbol, name)) in zip(cols, INDICES.items()):
+    q = get_live_quote(ticker)
     with col:
-        if q:
-            cls="buy" if (q["change_pct"] or 0)>=0 else "sell"
-            st.markdown(f'<div class="card"><b>{symbol}</b><br><span style="font-size:28px;font-weight:800">{money(q["price"])}</span><br><span class="{cls}">{q["change_pct"]:+.2f}%</span> today</div>',unsafe_allow_html=True)
+        if q and q.get("price") is not None:
+            cls = "buy" if (q.get("change_pct") or 0) >= 0 else "sell"
+            change_text = f'{q["change_pct"]:+.2f}%' if q.get("change_pct") is not None else "—"
+            st.markdown(f'<div class="card"><b>{symbol}</b><br><span style="font-size:28px;font-weight:800">{money(q["price"])}</span><br><span class="{cls}">{change_text}</span> today</div>', unsafe_allow_html=True)
         else:
-            st.warning(f"{symbol}: Yahoo Finance data unavailable")
+            st.warning(f"{symbol}: Yahoo Finance data temporarily unavailable")
 
-st.caption("Yahoo Finance is queried in batches and refreshed every 15 seconds. During market closures, the latest available quote may be shown. Yahoo Finance is a third-party data source and is not an exchange-direct feed.")
+st.caption("Yahoo Finance data is refreshed every 15 seconds. Yahoo may occasionally return temporary empty responses; SMA retries through Yahoo's chart endpoint.")
 
-if page=="Market Overview":
+if page == "Market Overview":
     st.subheader("Market Status")
-    if index_quotes: st.success("Yahoo Finance connection is active.")
-    else: st.error("Yahoo Finance is currently not returning index data. Try again after a short delay.")
+    st.info("Live quotes are fetched from Yahoo Finance. If Yahoo temporarily blocks a request, the page will retry automatically.")
 
-elif page=="Stock Analysis":
-    labels={f"{v[0]} — {v[1]}":k for k,v in STOCKS.items()}
-    selected=st.selectbox("Select NSE stock",list(labels.keys()))
-    ticker=labels[selected]
-    quote=get_live_quotes((ticker,)).get(ticker)
-    hist=indicators(get_history(ticker))
-    if quote:
-        c1,c2,c3,c4=st.columns(4)
-        c1.metric("Latest Price",money(quote["price"]))
-        c2.metric("Day Change",money(quote["change"]),f'{quote["change_pct"]:+.2f}%' if quote["change_pct"] is not None else None)
-        c3.metric("Day High",money(quote["high"]))
-        c4.metric("Day Low",money(quote["low"]))
-    else:
-        st.warning("Yahoo Finance did not return a current quote for this stock.")
+elif page == "Stock Analysis":
+    labels = {f"{v[0]} — {v[1]}": k for k,v in STOCKS.items()}
+    selected_label = st.selectbox("Select NSE stock", list(labels.keys()))
+    ticker = labels[selected_label]
+    q = get_live_quote(ticker); hist = indicators(get_history(ticker))
+    if q and q.get("price") is not None:
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("Live Price", money(q["price"]))
+        c2.metric("Day Change", money(q.get("change")), f'{q["change_pct"]:+.2f}%' if q.get("change_pct") is not None else None)
+        c3.metric("Day High", money(q.get("high"))); c4.metric("Day Low", money(q.get("low")))
     if not hist.empty:
-        sig=signal(hist); last=hist.iloc[-1]; momentum=0 if pd.isna(last.momentum20) else float(last.momentum20)
-        estimated=quote["price"]*(1+momentum*.25/100) if quote and quote["price"] else None
+        sig = signal(hist); last = hist.iloc[-1]; momentum = 0 if pd.isna(last.momentum20) else float(last.momentum20); estimated = q["price"] * (1 + momentum * .25 / 100) if q and q.get("price") else None
         st.subheader("Technical Analysis")
-        a,b,c,d=st.columns(4); a.metric("SMA 20",money(last.sma20)); b.metric("SMA 50",money(last.sma50)); c.metric("RSI",f'{last.rsi:.2f}' if pd.notna(last.rsi) else "—"); d.metric("20D Momentum",f'{momentum:+.2f}%')
-        st.line_chart(hist[["close","sma20","sma50"]].dropna(),height=420)
-        cls="buy" if sig=="BUY" else "sell" if sig=="SELL" else "hold"
-        st.markdown(f'<div class="card"><h3>Signal: <span class="{cls}">{sig}</span></h3><p>Estimated price: <b>{money(estimated)}</b></p><p class="muted">Estimated price is a momentum-based indicator, not a guaranteed forecast.</p></div>',unsafe_allow_html=True)
-    else: st.error("Historical data could not be loaded from Yahoo Finance.")
+        a,b,c,d = st.columns(4); a.metric("SMA 20", money(last.sma20)); b.metric("SMA 50", money(last.sma50)); c.metric("RSI", f'{last.rsi:.2f}' if pd.notna(last.rsi) else "—"); d.metric("20D Momentum", f'{momentum:+.2f}%')
+        st.line_chart(hist[["close","sma20","sma50"]].dropna(), height=420)
+        cls = "buy" if sig == "BUY" else "sell" if sig == "SELL" else "hold"
+        st.markdown(f'<div class="card"><h3>Signal: <span class="{cls}">{sig}</span></h3><p>Estimated price: <b>{money(estimated)}</b></p><p class="muted">Estimated price is a simple momentum-based indicator, not a guaranteed forecast.</p></div>', unsafe_allow_html=True)
+    elif not q:
+        st.error("Yahoo Finance could not return data for this stock right now. Please retry in a few seconds.")
 
 else:
-    search=st.text_input("Search NSE stocks",placeholder="Search symbol or company name...").strip().lower()
-    tickers=tuple(t for t,(s,n) in STOCKS.items() if not search or search in s.lower() or search in n.lower())
-    quotes=get_live_quotes(tickers)
-    rows=[]
-    for ticker in tickers:
-        q=quotes.get(ticker)
-        if q:
-            symbol,name=STOCKS[ticker]
-            rows.append({"Symbol":symbol,"Company":name,"Exchange":"NSE","Live Price":q["price"],"Change %":q["change_pct"]})
-    if rows:
-        st.dataframe(pd.DataFrame(rows).sort_values("Change %",ascending=False),use_container_width=True,hide_index=True)
-    else: st.warning("No live stock data available from Yahoo Finance right now.")
+    search = st.text_input("Search NSE stocks", placeholder="Search symbol or company name...").strip().lower(); rows = []
+    for ticker, (symbol, name) in STOCKS.items():
+        if search and search not in symbol.lower() and search not in name.lower(): continue
+        q = get_live_quote(ticker)
+        if q and q.get("price") is not None: rows.append({"Symbol":symbol,"Company":name,"Exchange":"NSE","Live Price":q["price"],"Change %":q.get("change_pct")})
+    if rows: st.dataframe(pd.DataFrame(rows).sort_values("Change %", ascending=False), use_container_width=True, hide_index=True)
+    else: st.warning("No live stock data available right now.")
 
-st.markdown('<div class="footer">SMA · Data provided by Yahoo Finance · For informational purposes only.</div>',unsafe_allow_html=True)
-
+st.markdown('<div class="footer">SMA · Data provided by Yahoo Finance · For informational purposes only.</div>', unsafe_allow_html=True)
 time.sleep(15)
 st.rerun()
