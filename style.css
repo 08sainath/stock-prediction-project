@@ -1,0 +1,74 @@
+/* ============================================================
+   SMA CSS TEST
+   ============================================================ */
+
+body {
+    background: #050505 !important;
+}
+
+.stApp {
+    background: #050505 !important;
+}
+
+.block-container {
+    max-width: 1450px !important;
+    padding-top: 2rem !important;
+}
+
+.hero {
+    background: linear-gradient(135deg, #111111, #1c1c1c, #0b1f3a) !important;
+    color: white !important;
+    border-radius: 24px !important;
+    padding: 35px !important;
+    box-shadow: 0 15px 50px rgba(0,0,0,.5) !important;
+}
+
+.hero h1 {
+    color: white !important;
+    font-size: 42px !important;
+}
+
+.hero p {
+    color: #b8c0cc !important;
+}
+
+.section-title {
+    color: white !important;
+    font-size: 30px !important;
+    font-weight: 800 !important;
+}
+
+.top-card {
+    background: #111827 !important;
+    color: white !important;
+    border: 1px solid #263244 !important;
+    border-radius: 22px !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35) !important;
+}
+
+.top-card h3 {
+    color: white !important;
+}
+
+.metric-title,
+.small,
+.muted {
+    color: #94a3b8 !important;
+}
+
+.metric-value {
+    color: white !important;
+}
+
+.stock-chip {
+    background: #111827 !important;
+    color: white !important;
+    border: 1px solid #334155 !important;
+}
+
+.info-box,
+.analysis-box {
+    background: #111827 !important;
+    color: white !important;
+    border: 1px solid #263244 !important;
+}
