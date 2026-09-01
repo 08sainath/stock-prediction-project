@@ -6,10 +6,9 @@ joblib==1.5.3
 streamlit==1.52.1
 altair==6.0.0
 
-yfinance==0.2.43
+yfinance==1.7.0
 
 PyYAML==6.0.1
-
 python-dateutil==2.9.0.post0
 pytz==2025.2
 tzdata==2025.3
@@ -21,9 +20,6 @@ lxml
 matplotlib==3.8.4
 seaborn==0.13.2
 plotly==5.18.0
-
 python-dotenv==1.0.0
-
 colorama==0.4.6
-
 websockets==12.0
