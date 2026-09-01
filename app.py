@@ -726,7 +726,7 @@ st.markdown(
 page = st.radio(
     "Navigation",
     [
-        "Dashboard",
+        "Home",
         "Stock Analysis",
         "All Stocks",
     ],
@@ -738,7 +738,7 @@ page = st.radio(
 # DASHBOARD
 # ============================================================
 
-if page == "Dashboard":
+if page == "Home":
 
     st.markdown(
         """
