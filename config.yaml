@@ -1,102 +1,416 @@
-# ===============================
-# API KEYS (ADD YOUR OWN)
-# ===============================
+# ============================================================
+# SMA — STOCK MARKET ANALYSIS
+# GLOBAL CONFIGURATION
+# ============================================================
+
+# ============================================================
+# API KEYS
+# ============================================================
 
 alpha_vantage_api_key: "YOUR_ALPHA_VANTAGE_API_KEY_HERE"
 news_api_key: "YOUR_NEWS_API_KEY_HERE"
 
-# ===============================
-# SUPPORTED STOCKS (3 Main Stocks)
-# ===============================
 
-supported_stocks:
-  - symbol: "AAPL"
-    name: "Apple Inc."
-    exchange: "NASDAQ"
-    live: true
-    data_source: "yfinance"
-    ticker: "AAPL"
-  
-  - symbol: "TCS"
-    name: "Tata Consultancy Services"
+# ============================================================
+# MARKET UNIVERSE
+# ============================================================
+
+market_universe:
+
+  # Indian equities
+  NSE:
+    enabled: true
     exchange: "NSE"
-    live: true
     data_source: "yfinance"
-    ticker: "TCS.NS"
-  
-  - symbol: "NIFTY50"
-    name: "NIFTY 50 Index"
+    ticker_suffix: ".NS"
+
+    # Load the current NSE equity list instead of manually
+    # maintaining every company in this config.
+    load_all_equities: true
+
+    official_security_list:
+      enabled: true
+      source: "NSE"
+      description: "NSE securities available for trading - Equity segment"
+
+  # BSE equities
+  BSE:
+    enabled: true
+    exchange: "BSE"
+    data_source: "yfinance"
+    ticker_suffix: ".BO"
+
+    load_all_equities: true
+
+  # International stocks
+  US:
+    enabled: true
+    exchange: "NASDAQ/NYSE"
+    data_source: "yfinance"
+
+    default_symbols:
+      - "AAPL"
+      - "MSFT"
+      - "GOOGL"
+      - "AMZN"
+      - "NVDA"
+      - "META"
+      - "TSLA"
+
+
+# ============================================================
+# DEFAULT STOCK
+# ============================================================
+
+default_stock_symbol: "RELIANCE.NS"
+
+default_exchange: "NSE"
+
+
+# ============================================================
+# INDICES
+# ============================================================
+
+indices:
+
+  NIFTY50:
+    name: "NIFTY 50"
     exchange: "NSE"
-    live: true
-    data_source: "yfinance"
     ticker: "^NSEI"
+    live: true
 
-# ===============================
-# MODEL SETTINGS
-# ===============================
+  BANKNIFTY:
+    name: "NIFTY BANK"
+    exchange: "NSE"
+    ticker: "^NSEBANK"
+    live: true
 
-default_stock_symbol: "AAPL"
-prediction_horizon: 1
-lookback_window: 60
+  NIFTYNEXT50:
+    name: "NIFTY NEXT 50"
+    exchange: "NSE"
+    ticker: "^NSMIDCP"
+    live: true
 
-models:
-  random_forest:
-    n_estimators: 200
-    max_depth: null
-    random_state: 42
-  
-  cnn_lstm:
-    hidden_size: 64
-    input_channels: 1
-    epochs: 10
-    learning_rate: 0.001
-    batch_size: 32
+  SENSEX:
+    name: "BSE SENSEX"
+    exchange: "BSE"
+    ticker: "^BSESN"
+    live: true
 
-# ===============================
-# PATHS
-# ===============================
 
-data_paths:
-  raw: "data/raw/"
-  processed: "data/processed/"
-  models: "models_saved/"
-  logs: "logs/"
+# ============================================================
+# DATA SETTINGS
+# ============================================================
 
-# ===============================
+data:
+
+  source: "yfinance"
+
+  history_period: "1y"
+
+  interval: "1d"
+
+  auto_adjust: false
+
+  timeout_seconds: 30
+
+  retry_attempts: 3
+
+  retry_delay_seconds: 2
+
+
+# ============================================================
 # REAL-TIME SETTINGS
-# ===============================
+# ============================================================
 
 realtime:
+
+  enabled: true
+
   update_interval_seconds: 30
-  enabled_stocks:
-    - "AAPL"
-    - "TCS"
-    - "NIFTY50"
 
-# ===============================
-# PREPROCESSING SETTINGS
-# ===============================
+  # Don't request thousands of stocks every 30 seconds.
+  # The frontend can request individual stocks on demand.
+  live_quote_mode: true
 
-preprocessing:
-  missing_value_method: "forward_fill"
-  normalization: "minmax"
-  
-# ===============================
+  preload_market_overview: true
+
+
+# ============================================================
+# MODEL SETTINGS
+# ============================================================
+
+prediction:
+
+  enabled: true
+
+  default_stock_symbol: "RELIANCE.NS"
+
+  prediction_horizon: 1
+
+  lookback_window: 60
+
+
+# ============================================================
+# MACHINE LEARNING MODELS
+# ============================================================
+
+models:
+
+  random_forest:
+
+    enabled: true
+
+    n_estimators: 200
+
+    max_depth: null
+
+    random_state: 42
+
+
+  cnn_lstm:
+
+    enabled: true
+
+    hidden_size: 64
+
+    input_channels: 1
+
+    epochs: 10
+
+    learning_rate: 0.001
+
+    batch_size: 32
+
+
+# ============================================================
+# TECHNICAL ANALYSIS
+# ============================================================
+
+technical_analysis:
+
+  indicators:
+
+    sma:
+      enabled: true
+      periods:
+        - 20
+        - 50
+        - 200
+
+    ema:
+      enabled: true
+      periods:
+        - 20
+        - 50
+        - 200
+
+    rsi:
+      enabled: true
+      period: 14
+
+    macd:
+      enabled: true
+      fast_period: 12
+      slow_period: 26
+      signal_period: 9
+
+    bollinger_bands:
+      enabled: true
+      period: 20
+      standard_deviation: 2
+
+    atr:
+      enabled: true
+      period: 14
+
+    stochastic:
+      enabled: true
+      period: 14
+
+
+# ============================================================
 # FEATURE ENGINEERING
-# ===============================
+# ============================================================
 
 feature_engineering:
+
   technical_indicators:
+
     - sma_20
+    - sma_50
+    - sma_200
+
     - ema_20
+    - ema_50
+    - ema_200
+
     - rsi
+
     - macd
-    - bollinger_bands
-  
+    - macd_signal
+    - macd_histogram
+
+    - bollinger_upper
+    - bollinger_middle
+    - bollinger_lower
+
+    - atr
+    - stochastic
+
   lag_features:
+
     - 1
+    - 2
     - 5
+    - 10
     - 20
-  
+
   volatility_window: 20
 
+
+# ============================================================
+# PREPROCESSING
+# ============================================================
+
+preprocessing:
+
+  missing_value_method: "forward_fill"
+
+  normalization: "minmax"
+
+  remove_duplicates: true
+
+
+# ============================================================
+# STOCK ANALYSIS
+# ============================================================
+
+stock_analysis:
+
+  calculate:
+
+    - current_price
+    - previous_close
+    - daily_change
+    - daily_change_percent
+
+    - weekly_change
+    - monthly_change
+
+    - year_high
+    - year_low
+
+    - volume
+    - average_volume
+
+    - market_cap
+
+    - pe_ratio
+    - eps
+
+    - dividend_yield
+
+    - beta
+
+    - sma_20
+    - sma_50
+    - sma_200
+
+    - rsi
+    - macd
+
+    - volatility
+
+    - momentum
+
+    - estimated_price
+
+    - expected_return
+
+    - trading_signal
+
+
+# ============================================================
+# TRADING SIGNAL
+# ============================================================
+
+signals:
+
+  enabled: true
+
+  labels:
+
+    bullish: "BUY"
+
+    neutral: "HOLD"
+
+    bearish: "SELL"
+
+
+# ============================================================
+# NEWS
+# ============================================================
+
+news:
+
+  enabled: true
+
+  provider: "newsapi"
+
+  language: "en"
+
+  page_size: 10
+
+
+# ============================================================
+# DATA STORAGE
+# ============================================================
+
+data_paths:
+
+  raw: "data/raw/"
+
+  processed: "data/processed/"
+
+  market_data: "data/market_data/"
+
+  stock_lists: "data/stock_lists/"
+
+  models: "models_saved/"
+
+  logs: "logs/"
+
+
+# ============================================================
+# CACHE
+# ============================================================
+
+cache:
+
+  enabled: true
+
+  stock_data_ttl_seconds: 120
+
+  market_overview_ttl_seconds: 30
+
+  stock_list_ttl_seconds: 86400
+
+
+# ============================================================
+# APPLICATION
+# ============================================================
+
+application:
+
+  name: "SMA"
+
+  full_name: "Stock Market Analysis"
+
+  default_page: "dashboard"
+
+  theme: "luxury"
+
+  currency: "INR"
+
+  timezone: "Asia/Kolkata"
