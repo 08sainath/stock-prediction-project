@@ -708,16 +708,16 @@ def percent(value):
 
 st.markdown(
     """
-    <div>
-        <div class="brand">SMA</div>
-        <div class="brand-subtitle">
-            Stock Market Analysis
-        </div>
+    <div class="hero">
+        <h1>📈 SMA — Stock Market Analysis</h1>
+        <p>
+            Real-Time Stock Data • Expected Price • Returns •
+            Signals • Confidence • Technical Analysis • News
+        </p>
     </div>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
-
 
 # ============================================================
 # NAVIGATION
