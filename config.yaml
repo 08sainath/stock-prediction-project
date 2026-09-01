@@ -1,109 +1,288 @@
-# =============================== 
-# API KEYS (ADD YOUR OWN) 
-# =============================== 
- 
-alpha_vantage_api_key: "YOUR_ALPHA_VANTAGE_API_KEY_HERE" 
-news_api_key: "YOUR_NEWS_API_KEY_HERE" 
- 
-# =============================== 
-# SUPPORTED STOCKS (3 Main Stocks) 
-# =============================== 
- 
-supported_stocks: 
-  - symbol: "AAPL" 
-    name: "Apple Inc." 
-    exchange: "NASDAQ" 
-    live: true 
-    data_source: "yfinance" 
-    ticker: "AAPL" 
-   
-  - symbol: "TCS" 
-    name: "Tata Consultancy Services" 
-    exchange: "NSE" 
-    live: true 
-    data_source: "yfinance" 
-    ticker: "TCS.NS" 
-   
-  - symbol: "NIFTY50" 
-    name: "NIFTY 50 Index" 
-    exchange: "NSE" 
-    live: true 
-    data_source: "yfinance" 
-    ticker: "^NSEI" 
- 
-# =============================== 
-# MODEL SETTINGS 
-# =============================== 
- 
-default_stock_symbol: "AAPL" 
-prediction_horizon: 1 
-lookback_window: 60 
- 
-models: 
-  random_forest: 
-    n_estimators: 200 
-    max_depth: null 
-    random_state: 42 
-   
-  cnn_lstm: 
-    hidden_size: 64 
-    input_channels: 1 
-    epochs: 10 
-    learning_rate: 0.001 
-    batch_size: 32 
- 
-# =============================== 
-# PATHS 
-# =============================== 
- 
-data_paths: 
-  raw: "data/raw/" 
-  processed: "data/processed/" 
-  models: "models_saved/" 
-  logs: "logs/" 
- 
-# =============================== 
-# REAL-TIME SETTINGS 
-# =============================== 
- 
-realtime: 
-  update_interval_seconds: 30 
-  enabled_stocks: 
-    - "AAPL" 
-    - "TCS" 
-    - "NIFTY50" 
- 
-# =============================== 
-# PREPROCESSING SETTINGS 
-# =============================== 
- 
-preprocessing: 
-  missing_value_method: "forward_fill" 
-  normalization: "minmax" 
-   
-# =============================== 
-# FEATURE ENGINEERING 
-# =============================== 
- 
-feature_engineering: 
-  technical_indicators: 
-    - sma_20 
-    - ema_20 
-    - rsi 
-    - macd 
-    - bollinger_bands 
-   
-  lag_features: 
-    - 1 
-    - 5 
-    - 20 
-   
-  volatility_window: 20 
+# ===============================
+# API KEYS
+# ===============================
 
+alpha_vantage_api_key: "YOUR_ALPHA_VANTAGE_API_KEY_HERE"
+news_api_key: "YOUR_NEWS_API_KEY_HERE"
 
+# ===============================
+# SUPPORTED INDIAN STOCKS
+# ===============================
 
+supported_stocks:
+  - symbol: "RELIANCE"
+    name: "Reliance Industries"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "RELIANCE.NS"
 
+  - symbol: "TCS"
+    name: "Tata Consultancy Services"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "TCS.NS"
 
+  - symbol: "INFY"
+    name: "Infosys"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "INFY.NS"
 
+  - symbol: "HDFCBANK"
+    name: "HDFC Bank"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "HDFCBANK.NS"
 
-   
+  - symbol: "ICICIBANK"
+    name: "ICICI Bank"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "ICICIBANK.NS"
+
+  - symbol: "SBIN"
+    name: "State Bank of India"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "SBIN.NS"
+
+  - symbol: "ITC"
+    name: "ITC Limited"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "ITC.NS"
+
+  - symbol: "BHARTIARTL"
+    name: "Bharti Airtel"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "BHARTIARTL.NS"
+
+  - symbol: "LT"
+    name: "Larsen & Toubro"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "LT.NS"
+
+  - symbol: "WIPRO"
+    name: "Wipro"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "WIPRO.NS"
+
+  - symbol: "HCLTECH"
+    name: "HCL Technologies"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "HCLTECH.NS"
+
+  - symbol: "MARUTI"
+    name: "Maruti Suzuki India"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "MARUTI.NS"
+
+  - symbol: "SUNPHARMA"
+    name: "Sun Pharmaceutical"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "SUNPHARMA.NS"
+
+  - symbol: "TATASTEEL"
+    name: "Tata Steel"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "TATASTEEL.NS"
+
+  - symbol: "TATAMOTORS"
+    name: "Tata Motors"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "TATAMOTORS.NS"
+
+  - symbol: "BAJFINANCE"
+    name: "Bajaj Finance"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "BAJFINANCE.NS"
+
+  - symbol: "AXISBANK"
+    name: "Axis Bank"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "AXISBANK.NS"
+
+  - symbol: "KOTAKBANK"
+    name: "Kotak Mahindra Bank"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "KOTAKBANK.NS"
+
+  - symbol: "ASIANPAINT"
+    name: "Asian Paints"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "ASIANPAINT.NS"
+
+  - symbol: "TITAN"
+    name: "Titan Company"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "TITAN.NS"
+
+  - symbol: "ADANIENT"
+    name: "Adani Enterprises"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "ADANIENT.NS"
+
+  - symbol: "ADANIPORTS"
+    name: "Adani Ports"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "ADANIPORTS.NS"
+
+  - symbol: "NTPC"
+    name: "NTPC Limited"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "NTPC.NS"
+
+  - symbol: "POWERGRID"
+    name: "Power Grid Corporation"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "POWERGRID.NS"
+
+  - symbol: "ONGC"
+    name: "Oil & Natural Gas Corporation"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "ONGC.NS"
+
+  - symbol: "COALINDIA"
+    name: "Coal India"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "COALINDIA.NS"
+
+  - symbol: "BEL"
+    name: "Bharat Electronics"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "BEL.NS"
+
+  - symbol: "HAL"
+    name: "Hindustan Aeronautics"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "HAL.NS"
+
+  - symbol: "IRFC"
+    name: "Indian Railway Finance Corporation"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "IRFC.NS"
+
+  - symbol: "IREDA"
+    name: "Indian Renewable Energy Development Agency"
+    exchange: "NSE"
+    live: true
+    data_source: "yfinance"
+    ticker: "IREDA.NS"
+
+# ===============================
+# MODEL SETTINGS
+# ===============================
+
+default_stock_symbol: "TCS"
+prediction_horizon: 1
+lookback_window: 60
+
+models:
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    random_state: 42
+  cnn_lstm:
+    hidden_size: 64
+    input_channels: 1
+    epochs: 10
+    learning_rate: 0.001
+    batch_size: 32
+
+# ===============================
+# PATHS
+# ===============================
+
+data_paths:
+  raw: "data/raw/"
+  processed: "data/processed/"
+  models: "models_saved/"
+  logs: "logs/"
+
+# ===============================
+# REAL-TIME SETTINGS
+# ===============================
+
+realtime:
+  update_interval_seconds: 30
+  enabled_stocks:
+    - "RELIANCE"
+    - "TCS"
+    - "INFY"
+    - "NIFTY50"
+
+# ===============================
+# PREPROCESSING
+# ===============================
+
+preprocessing:
+  missing_value_method: "forward_fill"
+  normalization: "minmax"
+
+# ===============================
+# FEATURE ENGINEERING
+# ===============================
+
+feature_engineering:
+  technical_indicators:
+    - sma_20
+    - ema_20
+    - rsi
+    - macd
+    - bollinger_bands
+  lag_features:
+    - 1
+    - 5
+    - 20
+  volatility_window: 20
