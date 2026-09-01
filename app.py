@@ -1,1340 +1,319 @@
-import os
-from datetime import datetime
-
-import numpy as np
-import pandas as pd
 import streamlit as st
-import yfinance as yf
+import requests
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
 
-
-# ============================================================
-# PAGE CONFIG
-# ============================================================
+# -----------------------------
+# Stock configuration
+# -----------------------------
+STOCK_OPTIONS = {
+    "AAPL": ("Apple Inc. (NASDAQ)", "AAPL"),
+    "TCS": ("Tata Consultancy Services (NSE)", "TCS.NS"),
+    "NIFTY50": ("NIFTY 50 Index (NSE)", "^NSEI"),
+}
 
 st.set_page_config(
-    page_title="SMA — Stock Market Analysis",
+    page_title="Real-Time Stock Market Analysis & Prediction",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed",
 )
 
-
-# ============================================================
-# LOAD CSS
-# ============================================================
-
-from pathlib import Path
-
+# -----------------------------
+# CSS
+# -----------------------------
 def load_css():
-    css_path = Path(__file__).parent / "style.css"
-
-    if css_path.exists():
-        css = css_path.read_text(encoding="utf-8")
-        st.markdown(
-            f"<style>{css}</style>",
-            unsafe_allow_html=True
-        )
-    else:
-        st.error(f"CSS file not found: {css_path}")
-
+    css = """
+    <style>
+    .metric-card {
+        padding: 18px;
+        border-radius: 12px;
+        border: 1px solid rgba(128,128,128,.25);
+        margin-bottom: 10px;
+    }
+    .signal {
+        font-size: 28px;
+        font-weight: 800;
+        padding: 12px 18px;
+        border-radius: 12px;
+        text-align: center;
+    }
+    .small { color: #777; font-size: 13px; }
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
 load_css()
 
-# ============================================================
-# STOCK LIST
-# ============================================================
-
-STOCKS = {
-    "TCS": "TCS.NS",
-    "INFY": "INFY.NS",
-    "RELIANCE": "RELIANCE.NS",
-    "WIPRO": "WIPRO.NS",
-
-    "HDFCBANK": "HDFCBANK.NS",
-    "ICICIBANK": "ICICIBANK.NS",
-    "SBIN": "SBIN.NS",
-    "AXISBANK": "AXISBANK.NS",
-    "KOTAKBANK": "KOTAKBANK.NS",
-    "INDUSINDBK": "INDUSINDBK.NS",
-
-    "LT": "LT.NS",
-    "ITC": "ITC.NS",
-    "BHARTIARTL": "BHARTIARTL.NS",
-
-    "MARUTI": "MARUTI.NS",
-
-    "TATASTEEL": "TATASTEEL.NS",
-    "TATACONSUM": "TATACONSUM.NS",
-
-    "SUNPHARMA": "SUNPHARMA.NS",
-    "DRREDDY": "DRREDDY.NS",
-    "CIPLA": "CIPLA.NS",
-
-    "HINDUNILVR": "HINDUNILVR.NS",
-    "ASIANPAINT": "ASIANPAINT.NS",
-
-    "BAJFINANCE": "BAJFINANCE.NS",
-    "BAJAJFINSV": "BAJAJFINSV.NS",
-
-    "ADANIENT": "ADANIENT.NS",
-    "ADANIPORTS": "ADANIPORTS.NS",
-
-    "NTPC": "NTPC.NS",
-    "POWERGRID": "POWERGRID.NS",
-    "ONGC": "ONGC.NS",
-    "COALINDIA": "COALINDIA.NS",
-    "BPCL": "BPCL.NS",
-
-    "JSWSTEEL": "JSWSTEEL.NS",
-    "HINDALCO": "HINDALCO.NS",
-
-    "HCLTECH": "HCLTECH.NS",
-    "TECHM": "TECHM.NS",
-
-    "APOLLOHOSP": "APOLLOHOSP.NS",
-    "ULTRACEMCO": "ULTRACEMCO.NS",
-
-    "TITAN": "TITAN.NS",
-    "NESTLEIND": "NESTLEIND.NS",
-
-    "BEL": "BEL.NS",
-    "HAL": "HAL.NS",
-
-    "IRFC": "IRFC.NS",
-    "IREDA": "IREDA.NS",
-
-    "ETERNAL": "ETERNAL.NS",
-
-    "TRENT": "TRENT.NS",
-    "EICHERMOT": "EICHERMOT.NS",
-    "HEROMOTOCO": "HEROMOTOCO.NS",
-
-    "GRASIM": "GRASIM.NS",
-}
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def money(value):
-    try:
-        return f"₹{float(value):,.2f}"
-    except Exception:
-        return "—"
-
-
-def percentage(value):
-    try:
-        return f"{float(value):+.2f}%"
-    except Exception:
-        return "—"
-
-
-def safe_float(value, default=0.0):
-    try:
-        value = float(value)
-        if np.isnan(value) or np.isinf(value):
-            return default
-        return value
-    except Exception:
-        return default
-
-
-# ============================================================
-# DOWNLOAD SINGLE STOCK
-# ============================================================
-
-@st.cache_data(ttl=120, show_spinner=False)
-def download_stock(symbol):
-    """
-    Download one stock from Yahoo Finance.
-
-    Returns:
-        pandas.DataFrame
-    """
-
-    try:
-        df = yf.download(
-            symbol,
-            period="6mo",
-            interval="1d",
-            auto_adjust=False,
-            progress=False,
-            threads=False,
-        )
-
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        # yfinance can return MultiIndex columns
-        if isinstance(df.columns, pd.MultiIndex):
-            try:
-                df.columns = df.columns.get_level_values(0)
-            except Exception:
-                df.columns = [
-                    str(col[0]) if isinstance(col, tuple) else str(col)
-                    for col in df.columns
-                ]
-
-        df = df.copy()
-
-        if "Close" not in df.columns:
-            return pd.DataFrame()
-
-        df["Close"] = pd.to_numeric(
-            df["Close"],
-            errors="coerce"
-        )
-
-        df = df.dropna(subset=["Close"])
-
-        return df
-
-    except Exception:
-        return pd.DataFrame()
-
-
-# ============================================================
-# TECHNICAL ANALYSIS
-# ============================================================
-
-def calculate_analysis(df):
-    if df is None or df.empty:
-        return None
-
-    if "Close" not in df.columns:
-        return None
-
-    close = pd.to_numeric(
-        df["Close"],
-        errors="coerce"
-    ).dropna()
-
-    if len(close) < 30:
-        return None
-
-    try:
-        current = safe_float(close.iloc[-1])
-        previous = safe_float(close.iloc[-2])
-
-        if previous == 0:
-            return None
-
-        # ----------------------------------------------------
-        # DAILY RETURN
-        # ----------------------------------------------------
-
-        day_return = (
-            (current - previous) / previous
-        ) * 100
-
-        # ----------------------------------------------------
-        # SMA
-        # ----------------------------------------------------
-
-        sma20 = safe_float(
-            close.rolling(20).mean().iloc[-1]
-        )
-
-        sma50 = safe_float(
-            close.rolling(50).mean().iloc[-1]
-        )
-
-        # ----------------------------------------------------
-        # RSI
-        # ----------------------------------------------------
-
-        delta = close.diff()
-
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
-
-        avg_gain = gain.rolling(14).mean()
-        avg_loss = loss.rolling(14).mean()
-
-        rs = avg_gain / avg_loss.replace(0, np.nan)
-
-        rsi_series = 100 - (
-            100 / (1 + rs)
-        )
-
-        rsi = safe_float(
-            rsi_series.iloc[-1],
-            50.0
-        )
-
-        if rsi == 0:
-            rsi = 50.0
-
-        rsi = max(0.0, min(100.0, rsi))
-
-        # ----------------------------------------------------
-        # MOMENTUM
-        # ----------------------------------------------------
-
-        momentum_5d = (
-            current / safe_float(close.iloc[-6], current) - 1
-        ) * 100
-
-        momentum_20d = (
-            current / safe_float(close.iloc[-21], current) - 1
-        ) * 100
-
-        # ----------------------------------------------------
-        # VOLATILITY
-        # ----------------------------------------------------
-
-        returns = close.pct_change()
-
-        volatility = safe_float(
-            returns.rolling(20).std().iloc[-1] * 100,
-            0.0
-        )
-
-        # ----------------------------------------------------
-        # SCORE
-        # ----------------------------------------------------
-
-        score = 50.0
-
-        if current > sma20:
-            score += 10
-        else:
-            score -= 10
-
-        if current > sma50:
-            score += 10
-        else:
-            score -= 10
-
-        if rsi > 55:
-            score += 8
-        elif rsi < 45:
-            score -= 8
-
-        if momentum_5d > 0:
-            score += 7
-        else:
-            score -= 7
-
-        if momentum_20d > 0:
-            score += 8
-        else:
-            score -= 8
-
-        score = max(10, min(90, score))
-
-        # ----------------------------------------------------
-        # EXPECTED RETURN
-        # ----------------------------------------------------
-
-        trend_component = momentum_20d * 0.35
-        short_component = momentum_5d * 0.25
-
-        expected_return = (
-            trend_component +
-            short_component
-        )
-
-        expected_return = max(
-            -12,
-            min(15, expected_return)
-        )
-
-        estimated_price = (
-            current *
-            (1 + expected_return / 100)
-        )
-
-        # ----------------------------------------------------
-        # SIGNAL
-        # ----------------------------------------------------
-
-        if score >= 65:
-            signal = "BUY"
-        elif score <= 35:
-            signal = "SELL"
-        else:
-            signal = "HOLD"
-
-        return {
-            "current": current,
-            "previous": previous,
-            "day_return": day_return,
-            "estimated": estimated_price,
-            "expected_return": expected_return,
-            "confidence": score,
-            "signal": signal,
-            "sma20": sma20,
-            "sma50": sma50,
-            "rsi": rsi,
-            "volatility": volatility,
-            "momentum_5d": momentum_5d,
-            "momentum_20d": momentum_20d,
-            "history": df,
-        }
-
-    except Exception:
-        return None
-
-
-# ============================================================
-# LOAD ALL STOCKS
-# ============================================================
-
-@st.cache_data(ttl=120, show_spinner=False)
-def load_all_stocks():
-    rows = []
-
-    for name, symbol in STOCKS.items():
-
-        df = download_stock(symbol)
-
-        analysis = calculate_analysis(df)
-
-        if analysis is None:
-            continue
-
-        rows.append({
-            "Stock": name,
-            "Symbol": symbol,
-            "Current Price": analysis["current"],
-            "Estimated Price": analysis["estimated"],
-            "Expected Return": analysis["expected_return"],
-            "Signal": analysis["signal"],
-            "Confidence": analysis["confidence"],
-            "Live Return": analysis["day_return"],
-            "RSI": analysis["rsi"],
-            "SMA20": analysis["sma20"],
-            "SMA50": analysis["sma50"],
-            "Momentum 5D": analysis["momentum_5d"],
-            "Momentum 20D": analysis["momentum_20d"],
-            "Volatility": analysis["volatility"],
-        })
-
-    result = pd.DataFrame(rows)
-
-    if not result.empty:
-        result = result.sort_values(
-            "Expected Return",
-            ascending=False
-        ).reset_index(drop=True)
-
-    return result
-
-
-# ============================================================
-# NEWS
-# ============================================================
-
-@st.cache_data(ttl=300, show_spinner=False)
-def get_news(symbol):
-    try:
-        ticker = yf.Ticker(symbol)
-
-        raw_news = ticker.news
-
-        if not raw_news:
-            return []
-
-        results = []
-
-        for item in raw_news[:8]:
-
-            content = item.get("content", {})
-
-            if not isinstance(content, dict):
-                content = {}
-
-            title = (
-                content.get("title")
-                or item.get("title")
-                or "Market News"
-            )
-
-            publisher = "News"
-
-            provider = content.get("provider", {})
-
-            if isinstance(provider, dict):
-                publisher = (
-                    provider.get("displayName")
-                    or provider.get("name")
-                    or "News"
-                )
-
-            results.append({
-                "title": str(title),
-                "publisher": str(publisher),
-            })
-
-        return results
-
-    except Exception:
-        return []
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
-st.markdown(
-    """
-    <div class="hero">
-        <h1>📈 SMA — Stock Market Analysis</h1>
-        <p>
-            Real-Time Stock Data • Expected Price • Returns •
-            Signals • Confidence • Technical Analysis • News
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# ============================================================
-# REFRESH
-# ============================================================
-
-refresh_col, update_col = st.columns([1, 5])
-
-with refresh_col:
-
-    if st.button(
-        "🔄 Refresh Data",
-        use_container_width=True
-    ):
+# -----------------------------
+# Yahoo Finance chart API
+# -----------------------------
+@st.cache_data(ttl=60)
+def get_market_data(symbol, period="6mo", interval="1d"):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {
+        "range": period,
+        "interval": interval,
+        "includePrePost": "false",
+        "events": "div,splits",
+    }
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    r = requests.get(url, params=params, headers=headers, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+
+    result = data["chart"]["result"][0]
+    timestamps = result.get("timestamp", [])
+    quote = result["indicators"]["quote"][0]
+
+    df = pd.DataFrame({
+        "Date": pd.to_datetime(timestamps, unit="s"),
+        "Open": quote.get("open", []),
+        "High": quote.get("high", []),
+        "Low": quote.get("low", []),
+        "Close": quote.get("close", []),
+        "Volume": quote.get("volume", []),
+    })
+
+    df = df.dropna(subset=["Close"]).set_index("Date")
+    return df
+
+# -----------------------------
+# Indicators
+# -----------------------------
+def add_indicators(df):
+    df = df.copy()
+
+    df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+    df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+
+    delta = df["Close"].diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    df["RSI"] = 100 - (100 / (1 + rs))
+
+    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+    df["MACD"] = ema12 - ema26
+    df["MACDSignal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+
+    df["Return1D"] = df["Close"].pct_change()
+    df["Momentum5D"] = df["Close"].pct_change(5)
+
+    return df.dropna()
+
+# -----------------------------
+# Simple explainable prediction
+# NOTE: This is a technical-signal model, not a guaranteed ML forecast.
+# -----------------------------
+def make_prediction(df):
+    last = df.iloc[-1]
+    score = 0.0
+    reasons = []
+
+    if last["Close"] > last["EMA20"]:
+        score += 1.0
+        reasons.append("Price above EMA20")
+    else:
+        score -= 1.0
+        reasons.append("Price below EMA20")
+
+    if last["EMA20"] > last["EMA50"]:
+        score += 1.0
+        reasons.append("EMA20 above EMA50")
+    else:
+        score -= 1.0
+        reasons.append("EMA20 below EMA50")
+
+    if last["MACD"] > last["MACDSignal"]:
+        score += 1.0
+        reasons.append("MACD bullish")
+    else:
+        score -= 1.0
+        reasons.append("MACD bearish")
+
+    if last["RSI"] < 30:
+        score += 0.5
+        reasons.append("RSI oversold")
+    elif last["RSI"] > 70:
+        score -= 0.5
+        reasons.append("RSI overbought")
+    elif last["RSI"] >= 50:
+        score += 0.5
+        reasons.append("RSI above 50")
+    else:
+        score -= 0.5
+        reasons.append("RSI below 50")
+
+    if last["Momentum5D"] > 0:
+        score += 0.5
+        reasons.append("5-day momentum positive")
+    else:
+        score -= 0.5
+        reasons.append("5-day momentum negative")
+
+    if score >= 2:
+        signal = "BUY"
+    elif score <= -2:
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+
+    # Heuristic confidence, intentionally capped.
+    confidence = min(95, max(50, 50 + abs(score) / 4.5 * 45))
+
+    # Small next-session estimate based on recent momentum + signal.
+    recent_vol = float(df["Return1D"].tail(20).std() or 0.01)
+    expected_move = np.clip(
+        (score / 5.0) * max(recent_vol, 0.003),
+        -0.08,
+        0.08,
+    )
+    predicted_price = float(last["Close"] * (1 + expected_move))
+
+    return signal, confidence, predicted_price, reasons
+
+# -----------------------------
+# Sidebar
+# -----------------------------
+with st.sidebar:
+    st.markdown("## 📌 Select Stock")
+    selected_stock = st.selectbox(
+        "Stock Symbol",
+        list(STOCK_OPTIONS.keys()),
+        format_func=lambda x: f"{x} — {STOCK_OPTIONS[x][0]}",
+    )
+
+    period = st.selectbox(
+        "Historical Data",
+        ["1mo", "3mo", "6mo", "1y", "2y"],
+        index=2,
+    )
+
+    refresh = st.button("🔄 Refresh Data", use_container_width=True)
+
+    if refresh:
         st.cache_data.clear()
         st.rerun()
 
+# -----------------------------
+# Main
+# -----------------------------
+display_name, yahoo_symbol = STOCK_OPTIONS[selected_stock]
 
-with update_col:
-
-    st.markdown(
-        f"""
-        <div class="updated-text">
-            Last checked:
-            <b>{datetime.now().strftime("%d-%m-%Y %H:%M:%S")}</b>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# ============================================================
-# MARKET STOCK CHIPS
-# ============================================================
-
-st.markdown(
-    '<div class="section-title">📌 Market Stocks</div>',
-    unsafe_allow_html=True,
+st.title("📈 Real-Time Stock Market Analysis & Prediction System")
+st.caption(
+    "Live market data + explainable technical analysis. "
+    "Prediction is an analytical estimate, not a guaranteed future price."
 )
 
-chip_html = '<div class="stock-scroll">' 
-
-for stock in list(STOCKS.keys())[:14]:
-
-    chip_html += f"""
-        <div class="stock-chip">
-            {stock}
-        </div>
-    """
-
-chip_html += "</div>"
-
-st.markdown(
-    chip_html,
-    unsafe_allow_html=True,
-)
-
-# ============================================================
-# STOCK SELECTOR
-# ============================================================
-
-selected_stock = st.selectbox(
-    "Select stock",
-    list(STOCKS.keys()),
-)
-
-
-# ============================================================
-# NAVIGATION
-# ============================================================
-
-page = st.radio(
-    "Navigation",
-    [
-        "🏠 Home",
-        "📊 All Listed Stocks",
-        "🔍 Stock Analysis",
-    ],
-    horizontal=True,
-    label_visibility="collapsed",
-)
-
-
-st.divider()
-
-
-# ============================================================
-# LOAD DATA
-# ============================================================
-
-with st.spinner("Loading market data..."):
-    all_df = load_all_stocks()
-
-
-# ============================================================
-# DATA ERROR
-# ============================================================
-
-if all_df.empty:
-
-    st.error(
-        "Market data load avvatledu."
-    )
-
-    st.info(
-        "Yahoo Finance connection check cheyyandi. "
-        "CMD lo TCS.NS test successful ayithe "
-        "Refresh Data click cheyyandi."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# HOME PAGE
-# ============================================================
-
-if page == "🏠 Home":
-
-    st.markdown(
-        '<div class="section-title">🔥 Top Stocks For Today</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.caption(
-        "Highest analytical expected return → lowest expected return"
-    )
-
-    top_df = all_df.head(9)
-
-    for start in range(0, len(top_df), 3):
-
-        cols = st.columns(3)
-
-        batch = top_df.iloc[
-            start:start + 3
-        ]
-
-        for col, (_, row) in zip(
-            cols,
-            batch.iterrows()
-        ):
-
-            signal = str(row["Signal"])
-
-            signal_class = signal.lower()
-
-            expected_class = (
-                "return-positive"
-                if row["Expected Return"] >= 0
-                else "return-negative"
-            )
-
-            live_class = (
-                "return-positive"
-                if row["Live Return"] >= 0
-                else "return-negative"
-            )
-
-            with col:
-
-                st.markdown(
-                    f"""
-                    <div class="top-card">
-
-                        <div class="card-top-row">
-
-                            <h3>
-                                {row["Stock"]}
-                            </h3>
-
-                            <span class="signal {signal_class}">
-                                {signal}
-                            </span>
-
-                        </div>
-
-                        <div class="small">
-                            Live Market Return
-                        </div>
-
-                        <div class="metric-value {live_class}">
-                            {row["Live Return"]:+.2f}%
-                        </div>
-
-                        <div class="price-grid">
-
-                            <div>
-                                <span class="metric-title">
-                                    Current Price
-                                </span>
-
-                                <strong>
-                                    ₹{row["Current Price"]:,.2f}
-                                </strong>
-                            </div>
-
-                            <div>
-                                <span class="metric-title">
-                                    Estimated Price
-                                </span>
-
-                                <strong>
-                                    ₹{row["Estimated Price"]:,.2f}
-                                </strong>
-                            </div>
-
-                        </div>
-
-                        <div class="expected-box">
-
-                            <span>
-                                Expected Return
-                            </span>
-
-                            <b class="{expected_class}">
-                                {row["Expected Return"]:+.2f}%
-                            </b>
-
-                        </div>
-
-                        <div class="confidence-row">
-
-                            <span>
-                                Confidence
-                            </span>
-
-                            <b>
-                                {row["Confidence"]:.0f}%
-                            </b>
-
-                        </div>
-
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-
-    # ========================================================
-    # RANKING
-    # ========================================================
-
-    st.markdown(
-        '<div class="section-title">📊 Today\'s Ranking</div>',
-        unsafe_allow_html=True,
-    )
-
-    ranking_df = all_df[
-        [
-            "Stock",
-            "Current Price",
-            "Estimated Price",
-            "Expected Return",
-            "Signal",
-            "Confidence",
-            "Live Return",
-        ]
-    ].copy()
-
-    ranking_df.columns = [
-        "Stock",
-        "Current Price",
-        "Estimated Price",
-        "Expected Return",
-        "Signal",
-        "Confidence",
-        "Live Return",
-    ]
-
-    st.dataframe(
-        ranking_df.style.format({
-            "Current Price": "₹{:,.2f}",
-            "Estimated Price": "₹{:,.2f}",
-            "Expected Return": "{:+.2f}%",
-            "Confidence": "{:.0f}%",
-            "Live Return": "{:+.2f}%",
-        }),
-        use_container_width=True,
-        hide_index=True,
-        height=500,
-    )
-
-
-# ============================================================
-# ALL LISTED STOCKS
-# ============================================================
-
-elif page == "📊 All Listed Stocks":
-
-    st.markdown(
-        '<div class="section-title">📋 All Listed Stocks</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.caption(
-        "Stocks successfully received from Yahoo Finance"
-    )
-
-    search = st.text_input(
-        "Search stock",
-        placeholder="Search TCS, INFY, RELIANCE..."
-    )
-
-    display_df = all_df.copy()
-
-    if search.strip():
-
-        search_upper = search.strip().upper()
-
-        display_df = display_df[
-            display_df["Stock"]
-            .str.upper()
-            .str.contains(
-                search_upper,
-                na=False
-            )
-        ]
-
-    display_df = display_df[
-        [
-            "Stock",
-            "Current Price",
-            "Estimated Price",
-            "Expected Return",
-            "Signal",
-            "Confidence",
-            "Live Return",
-            "RSI",
-            "SMA20",
-            "SMA50",
-        ]
-    ]
-
-    st.dataframe(
-        display_df.style.format({
-            "Current Price": "₹{:,.2f}",
-            "Estimated Price": "₹{:,.2f}",
-            "Expected Return": "{:+.2f}%",
-            "Confidence": "{:.0f}%",
-            "Live Return": "{:+.2f}%",
-            "RSI": "{:.1f}",
-            "SMA20": "₹{:,.2f}",
-            "SMA50": "₹{:,.2f}",
-        }),
-        use_container_width=True,
-        hide_index=True,
-        height=600,
-    )
-
-
-# ============================================================
-# STOCK ANALYSIS
-# ============================================================
-
-elif page == "🔍 Stock Analysis":
-
-    symbol = STOCKS[selected_stock]
-
-    st.markdown(
-        f"""
-        <div class="section-title">
-            🔍 {selected_stock} — Stock Analysis
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    df = download_stock(symbol)
-
-    analysis = calculate_analysis(df)
-
-    if analysis is None:
-
-        st.error(
-            f"Data available kaaledu for {selected_stock}."
-        )
-
+try:
+    raw = get_market_data(yahoo_symbol, period=period, interval="1d")
+    df = add_indicators(raw)
+
+    if len(df) < 60:
+        st.warning("Not enough historical data was returned for reliable indicators.")
         st.stop()
 
+    signal, confidence, predicted_price, reasons = make_prediction(df)
 
-    current = analysis["current"]
-    estimated = analysis["estimated"]
-    expected_return = analysis["expected_return"]
-    signal = analysis["signal"]
-    confidence = analysis["confidence"]
-    live_return = analysis["day_return"]
-    rsi = analysis["rsi"]
-    sma20 = analysis["sma20"]
-    sma50 = analysis["sma50"]
-    momentum5 = analysis["momentum_5d"]
-    momentum20 = analysis["momentum_20d"]
-    volatility = analysis["volatility"]
+    last = df.iloc[-1]
+    previous_close = float(df["Close"].iloc[-2])
+    current_price = float(last["Close"])
+    change = current_price - previous_close
+    change_pct = change / previous_close * 100
 
+    # Header
+    st.subheader(f"{selected_stock} — {display_name}")
+    st.caption(
+        f"Last available market candle: "
+        f"{df.index[-1].strftime('%Y-%m-%d %H:%M')} | Symbol: {yahoo_symbol}"
+    )
 
-    # ========================================================
-    # MAIN METRICS
-    # ========================================================
-
+    # Metrics
     c1, c2, c3, c4 = st.columns(4)
 
-    with c1:
+    c1.metric(
+        "Current Price",
+        f"{current_price:,.2f}",
+        f"{change:+,.2f} ({change_pct:+.2f}%)",
+    )
 
-        st.markdown(
-            f"""
-            <div class="analysis-box">
+    c2.metric(
+        "Estimated Next Price",
+        f"{predicted_price:,.2f}",
+        f"{(predicted_price/current_price-1)*100:+.2f}%",
+    )
 
-                <div class="metric-title">
-                    Current Price
-                </div>
+    c3.metric("Signal", signal)
+    c4.metric("Confidence", f"{confidence:.0f}%")
 
-                <div class="big-number">
-                    ₹{current:,.2f}
-                </div>
+    st.divider()
 
-                <div class="small">
-                    Live / latest available
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with c2:
-
-        st.markdown(
-            f"""
-            <div class="analysis-box">
-
-                <div class="metric-title">
-                    Estimated Price
-                </div>
-
-                <div class="big-number">
-                    ₹{estimated:,.2f}
-                </div>
-
-                <div class="small">
-                    Analytical estimate
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with c3:
-
-        signal_class = signal.lower()
-
-        st.markdown(
-            f"""
-            <div class="analysis-box">
-
-                <div class="metric-title">
-                    Signal
-                </div>
-
-                <div class="big-number signal {signal_class}">
-                    {signal}
-                </div>
-
-                <div class="small">
-                    Technical score based
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with c4:
-
-        confidence_class = (
-            "return-positive"
-            if confidence >= 60
-            else "return-negative"
-        )
-
-        st.markdown(
-            f"""
-            <div class="analysis-box">
-
-                <div class="metric-title">
-                    Confidence
-                </div>
-
-                <div class="big-number {confidence_class}">
-                    {confidence:.0f}%
-                </div>
-
-                <div class="small">
-                    Analytical confidence
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    # ========================================================
-    # RETURNS
-    # ========================================================
-
+    # Signal banner
     st.markdown(
-        '<div class="section-title">📈 Returns & Forecast</div>',
+        f'<div class="signal">Signal: {signal} &nbsp; | &nbsp; '
+        f'Confidence: {confidence:.0f}%</div>',
         unsafe_allow_html=True,
     )
 
-    r1, r2, r3 = st.columns(3)
+    st.write("")
 
-    live_class = (
-        "return-positive"
-        if live_return >= 0
-        else "return-negative"
-    )
+    left, right = st.columns([2, 1])
 
-    expected_class = (
-        "return-positive"
-        if expected_return >= 0
-        else "return-negative"
-    )
+    with left:
+        st.subheader("📊 Price & Trend")
 
-    with r1:
+        chart_df = df[["Close", "EMA20", "EMA50"]].tail(120)
+        st.line_chart(chart_df, use_container_width=True)
 
-        st.markdown(
-            f"""
-            <div class="info-box">
+    with right:
+        st.subheader("🧠 Analysis")
 
-                <div class="metric-title">
-                    Today's Return
-                </div>
+        st.write("**Indicators**")
+        st.write(f"RSI: **{last['RSI']:.2f}**")
+        st.write(f"EMA20: **{last['EMA20']:.2f}**")
+        st.write(f"EMA50: **{last['EMA50']:.2f}**")
+        st.write(f"MACD: **{last['MACD']:.4f}**")
+        st.write(f"5D Momentum: **{last['Momentum5D']*100:.2f}%**")
 
-                <div class="metric-value {live_class}">
-                    {live_return:+.2f}%
-                </div>
+        st.write("**Why this signal?**")
+        for reason in reasons:
+            st.write(f"• {reason}")
 
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    st.divider()
 
+    a, b = st.columns(2)
 
-    with r2:
+    with a:
+        st.subheader("📈 Recent Market Data")
+        view = df[["Open", "High", "Low", "Close", "Volume"]].tail(10).copy()
+        st.dataframe(view, use_container_width=True)
 
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    Expected Return
-                </div>
-
-                <div class="metric-value {expected_class}">
-                    {expected_return:+.2f}%
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with r3:
-
-        price_difference = estimated - current
-
-        price_class = (
-            "return-positive"
-            if price_difference >= 0
-            else "return-negative"
-        )
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    Expected Price Change
-                </div>
-
-                <div class="metric-value {price_class}">
-                    ₹{price_difference:+,.2f}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    # ========================================================
-    # CHART
-    # ========================================================
-
-    st.markdown(
-        '<div class="section-title">📊 Price Chart</div>',
-        unsafe_allow_html=True,
-    )
-
-    history = analysis["history"].copy()
-
-    chart_df = history[["Close"]].copy()
-
-    chart_df["SMA20"] = (
-        chart_df["Close"]
-        .rolling(20)
-        .mean()
-    )
-
-    chart_df["SMA50"] = (
-        chart_df["Close"]
-        .rolling(50)
-        .mean()
-    )
-
-    chart_df = chart_df.dropna(
-        subset=["Close"]
-    )
-
-    st.line_chart(
-        chart_df[
-            ["Close", "SMA20", "SMA50"]
-        ],
-        use_container_width=True,
-    )
-
-
-    # ========================================================
-    # TECHNICAL INDICATORS
-    # ========================================================
-
-    st.markdown(
-        '<div class="section-title">⚙️ Technical Indicators</div>',
-        unsafe_allow_html=True,
-    )
-
-    t1, t2, t3, t4 = st.columns(4)
-
-    with t1:
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    RSI (14)
-                </div>
-
-                <div class="metric-value">
-                    {rsi:.1f}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with t2:
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    SMA 20
-                </div>
-
-                <div class="metric-value">
-                    ₹{sma20:,.2f}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with t3:
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    SMA 50
-                </div>
-
-                <div class="metric-value">
-                    ₹{sma50:,.2f}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with t4:
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    Volatility
-                </div>
-
-                <div class="metric-value">
-                    {volatility:.2f}%
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    # ========================================================
-    # MOMENTUM
-    # ========================================================
-
-    st.markdown(
-        '<div class="section-title">🚀 Momentum</div>',
-        unsafe_allow_html=True,
-    )
-
-    m1, m2 = st.columns(2)
-
-    momentum5_class = (
-        "return-positive"
-        if momentum5 >= 0
-        else "return-negative"
-    )
-
-    momentum20_class = (
-        "return-positive"
-        if momentum20 >= 0
-        else "return-negative"
-    )
-
-    with m1:
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    5 Day Momentum
-                </div>
-
-                <div class="metric-value {momentum5_class}">
-                    {momentum5:+.2f}%
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with m2:
-
-        st.markdown(
-            f"""
-            <div class="info-box">
-
-                <div class="metric-title">
-                    20 Day Momentum
-                </div>
-
-                <div class="metric-value {momentum20_class}">
-                    {momentum20:+.2f}%
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    # ========================================================
-    # NEWS
-    # ========================================================
-
-    st.markdown(
-        '<div class="section-title">📰 Latest News</div>',
-        unsafe_allow_html=True,
-    )
-
-    news = get_news(symbol)
-
-    if news:
-
-        for item in news:
-
-            title = item["title"]
-            publisher = item["publisher"]
-
-            st.markdown(
-                f"""
-                <div class="news-card">
-
-                    <div class="news-title">
-                        {title}
-                    </div>
-
-                    <div class="muted">
-                        {publisher}
-                    </div>
-
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    else:
-
+    with b:
+        st.subheader("⚠️ Risk Notes")
         st.info(
-            "News currently available kaaledu."
+            "This dashboard provides an analytical signal based on recent "
+            "price/technical data. It is not a guaranteed prediction and "
+            "should not be treated as financial advice."
+        )
+        st.write(
+            "For live intraday trading, use an authorised broker/data feed. "
+            "Yahoo Finance data can be delayed and may not represent tick-by-tick prices."
         )
 
+except requests.exceptions.RequestException as e:
+    st.error("Unable to fetch market data.")
+    st.code(str(e))
+    st.info(
+        "Check your internet connection and try the 🔄 Refresh Data button."
+    )
 
-# ============================================================
-# DISCLAIMER
-# ============================================================
-
-st.markdown(
-    """
-    <div class="disclaimer">
-
-        <b>Disclaimer:</b>
-        SMA analytical estimates are generated from historical
-        market data and technical indicators. They are not guaranteed
-        predictions and should not be treated as financial advice.
-        Always perform your own research before making investment
-        decisions.
-
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+except Exception as e:
+    st.error("Dashboard could not process the selected stock.")
+    st.code(f"{type(e).__name__}: {e}")
+    st.info(
+        "The error is shown above so it can be fixed without hiding the real cause."
+    )
