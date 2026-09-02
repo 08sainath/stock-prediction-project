@@ -1,6 +1,8 @@
 import io
 import math
 import time
+from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -339,9 +341,26 @@ def estimate_signal(current, hist):
 
 @st.cache_data(ttl=120, show_spinner=False)
 def stock_snapshot(ticker):
-    q = yahoo_chart(ticker, "1d", "1m") or yahoo_chart(ticker, "5d", "1d")
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    market_open = now.weekday() < 5 and dt_time(9, 15) <= now.time() < dt_time(15, 30)
+
+    # While the exchange is open, use the latest intraday quote.
+    if market_open:
+        q = yahoo_chart(ticker, "1d", "1m") or yahoo_chart(ticker, "5d", "1d")
+    else:
+        # After close, deliberately use the latest completed daily candle so
+        # the UI stays on the last market-close data rather than stale/random data.
+        q = yahoo_chart(ticker, "5d", "1d")
+        if q and q.get("closes"):
+            closes = [x for x in q["closes"] if x is not None]
+            if closes:
+                q["price"] = closes[-1]
+                q["close"] = closes[-2] if len(closes) > 1 else None
+                q["change"] = q["price"] - q["close"] if q["close"] not in (None, 0) else None
+                q["change_pct"] = (q["change"] / q["close"] * 100) if q["change"] is not None and q["close"] not in (None, 0) else None
     if not q:
         return None
+
     hist = historical(ticker)
     estimated, signal, confidence, reasons = estimate_signal(q["price"], hist)
     latest = technicals(hist).iloc[-1] if not hist.empty else pd.Series(dtype=float)
@@ -368,7 +387,19 @@ INDEXES = [
 
 
 def index_snapshot(ticker):
-    return yahoo_chart(ticker, "5d", "1d")
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    market_open = now.weekday() < 5 and dt_time(9, 15) <= now.time() < dt_time(15, 30)
+    if market_open:
+        return yahoo_chart(ticker, "1d", "1m") or yahoo_chart(ticker, "5d", "1d")
+    q = yahoo_chart(ticker, "5d", "1d")
+    if q and q.get("closes"):
+        closes = [x for x in q["closes"] if x is not None]
+        if closes:
+            q["price"] = closes[-1]
+            q["close"] = closes[-2] if len(closes) > 1 else None
+            q["change"] = q["price"] - q["close"] if q["close"] not in (None, 0) else None
+            q["change_pct"] = (q["change"] / q["close"] * 100) if q["change"] is not None and q["close"] not in (None, 0) else None
+    return q
 
 
 # ============================================================
@@ -434,55 +465,98 @@ def render_metric(label, value):
 # Pages
 # ============================================================
 def home_page():
-    st.markdown('<div class="brand">SMA</div><div class="page-title">Good morning</div><div class="page-sub">Your Indian market dashboard — simple, clean and data-first.</div>', unsafe_allow_html=True)
+    # SMA header + exact market status requested.
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    market_open = now.weekday() < 5 and dt_time(9, 15) <= now.time() < dt_time(15, 30)
+    status = "LIVE" if market_open else "CLOSED"
 
-    # Market strip, Groww-inspired.
+    h1, h2 = st.columns([9, 1])
+    with h1:
+        st.markdown(f'<div class="brand" style="margin:0">SMA <span style="letter-spacing:1px;font-size:11px;color:{"#16834b" if market_open else "#77736d"}">• {status}</span></div>', unsafe_allow_html=True)
+    with h2:
+        if st.button("⌕", key="home_search_btn", help="Search a stock", use_container_width=True):
+            st.session_state["home_search_open"] = not st.session_state.get("home_search_open", False)
+
+    st.markdown('<div style="display:flex;align-items:center;gap:10px;margin-top:10px"><div class="page-title">Good Morning</div></div>', unsafe_allow_html=True)
+
+    # Search is hidden until the search icon is clicked.
+    if st.session_state.get("home_search_open", False):
+        st.markdown('<div class="search-box" style="margin-top:12px">', unsafe_allow_html=True)
+        search = st.text_input("Search stocks", placeholder="Search stock name or symbol…", label_visibility="collapsed", key="home_search")
+        if search.strip():
+            matches = UNIVERSE[
+                UNIVERSE["symbol"].astype(str).str.upper().str.contains(search.strip().upper(), regex=False, na=False)
+                | UNIVERSE["company"].astype(str).str.upper().str.contains(search.strip().upper(), regex=False, na=False)
+            ].head(8)
+            if matches.empty:
+                st.info("No NSE/BSE stock found.")
+            else:
+                for _, row in matches.iterrows():
+                    c1, c2 = st.columns([5, 1])
+                    c1.write(f"**{row.symbol}** · {row.company} · {row.exchange}")
+                    if c2.button("Open", key=f"home_open_{row.exchange}_{row.symbol}"):
+                        st.session_state["analysis_query"] = row.symbol
+                        st.session_state["page"] = "Analysis"
+                        st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Navigation sits directly below Good Morning/search.
+    st.markdown('<div class="section-title" style="margin-top:20px">Home – All Stocks Analysis</div>', unsafe_allow_html=True)
+    options = ["Home", "All Stocks", "Analysis"]
+    nav = st.radio("Navigation", options, index=options.index(st.session_state.get("page", "Home")), horizontal=True, label_visibility="collapsed", key="home_navigation")
+    st.session_state["page"] = nav
+    if nav != "Home":
+        if nav == "All Stocks":
+            all_stocks_page()
+        else:
+            analysis_page()
+        return
+
+    # Only NIFTY and SENSEX on the Home page, with live/last-close values.
+    st.markdown('<div class="section-title">NIFTY & SENSEX</div>', unsafe_allow_html=True)
     market_html = '<div class="market-strip">'
-    for name, ticker in INDEXES:
+    for name, ticker in [("NIFTY", "^NSEI"), ("SENSEX", "^BSESN")]:
         q = index_snapshot(ticker)
         if q:
-            cls = "up" if (q["change_pct"] or 0) >= 0 else "down"
-            market_html += f'<div class="market-chip"><div class="mname">{name}</div><div class="mvalue">{money(q["price"])}</div><div class="mchange {cls}">{pct(q["change_pct"])}</div></div>'
+            cls = "up" if (q.get("change_pct") or 0) >= 0 else "down"
+            market_html += f'<div class="market-chip"><div class="mname">{name}</div><div class="mvalue">{money(q.get("price"))}</div><div class="mchange {cls}">{pct(q.get("change_pct"))} · {"Live" if market_open else "Close"}</div></div>'
         else:
-            market_html += f'<div class="market-chip"><div class="mname">{name}</div><div class="mvalue">₹—</div><div class="mchange">Live data unavailable</div></div>'
+            market_html += f'<div class="market-chip"><div class="mname">{name}</div><div class="mvalue">₹—</div><div class="mchange">Data unavailable</div></div>'
     market_html += '</div>'
     st.markdown(market_html, unsafe_allow_html=True)
 
-    st.markdown('<div class="hero"><div class="hero-title">Find a stock</div><div class="hero-sub">Search any NSE or BSE company to open its full analysis.</div></div>', unsafe_allow_html=True)
-    search = st.text_input("Search stocks", placeholder="Search TCS, Reliance, Infosys, 20 Microns…", label_visibility="collapsed", key="home_search")
-    if search.strip():
-        match = resolve_stock(search)
-        if match:
-            st.session_state["analysis_query"] = match["symbol"]
-            st.session_state["page"] = "Analysis"
-            st.rerun()
-        else:
-            st.warning("No NSE/BSE stock found for that search.")
+    # Stocks to Watch = best gainers first, followed by notable large-cap names.
+    st.markdown('<div class="section-title">Stocks to Watch</div>', unsafe_allow_html=True)
+    watch_symbols = [
+        "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN",
+        "BHARTIARTL", "LT", "ITC", "HCLTECH", "MARUTI", "SUNPHARMA",
+        "TATASTEEL", "TATAMOTORS", "WIPRO",
+    ]
+    watch = UNIVERSE[UNIVERSE["symbol"].isin(watch_symbols)].drop_duplicates("symbol")
+    snapshots = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(stock_snapshot, row.yahoo): row for _, row in watch.iterrows()}
+        for future in as_completed(futures):
+            row = futures[future]
+            try:
+                snap = future.result()
+                if snap:
+                    snapshots.append((row, snap))
+            except Exception:
+                pass
 
-    st.markdown('<div class="section-title">Stocks to watch</div>', unsafe_allow_html=True)
-    watch_symbols = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN"]
-    watch = UNIVERSE[UNIVERSE.symbol.isin(watch_symbols)].drop_duplicates("symbol").head(6)
-    cols = st.columns(3)
-    for i, (_, row) in enumerate(watch.iterrows()):
-        with cols[i % 3]:
-            render_stock_card(row, stock_snapshot(row.yahoo))
-
-    st.markdown('<div class="section-title">Best signals right now</div>', unsafe_allow_html=True)
-    candidates = UNIVERSE[UNIVERSE.exchange == "NSE"].head(18)
-    picks = []
-    for _, row in candidates.iterrows():
-        snap = stock_snapshot(row.yahoo)
-        if snap and snap.get("signal"):
-            picks.append((row, snap))
-    picks = sorted(picks, key=lambda x: x[1].get("confidence", 0), reverse=True)[:3]
-    if picks:
+    # Best gainers first; when closed this is based on the completed last session.
+    snapshots.sort(key=lambda item: item[1].get("change_pct") if item[1].get("change_pct") is not None else -999, reverse=True)
+    snapshots = snapshots[:6]
+    if snapshots:
         cols = st.columns(3)
-        for i, (row, snap) in enumerate(picks):
-            with cols[i]: render_stock_card(row, snap)
+        for i, (row, snap) in enumerate(snapshots):
+            with cols[i % 3]:
+                render_stock_card(row, snap)
     else:
-        st.info("Live market data is temporarily unavailable.")
+        st.info("Market data is temporarily unavailable.")
 
-    st.markdown('<div class="small-note" style="margin-top:22px">Estimated price and confidence are SMA technical estimates, not guaranteed future prices.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="small-note" style="margin-top:18px">Market status: <b>{status}</b> · Data shown is {"live while the market is open" if market_open else "the latest completed market-close data"}.</div>', unsafe_allow_html=True)
 
 
 def all_stocks_page():
@@ -647,3 +721,5 @@ else:
     analysis_page()
 
 navigation()
+
+# SMA HOME UI V2 APPLIED
