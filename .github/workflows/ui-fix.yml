@@ -1,0 +1,314 @@
+name: Apply SMA home UI fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch app.py
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          marker = '# ============================================================\n# SMA — luxury / light, Groww-inspired investment dashboard\n# ============================================================'
+          if marker not in s:
+              raise SystemExit('marker not found')
+          override = r'''
+# ============================================================
+# SMA UI override — requested Home layout/status/search behavior
+# ============================================================
+from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
+
+SMA_IST = ZoneInfo("Asia/Kolkata")
+SMA_SESSION = requests.Session()
+SMA_SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36",
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-IN,en;q=0.9",
+})
+
+
+def sma_num(v):
+    try:
+        x = float(v)
+        return x if np.isfinite(x) else None
+    except Exception:
+        return None
+
+
+def sma_money(v):
+    return "₹—" if v is None or pd.isna(v) else f"₹{float(v):,.2f}"
+
+
+def sma_pct(v):
+    return "—" if v is None or pd.isna(v) else f"{float(v):+.2f}%"
+
+
+def sma_market_status():
+    now = datetime.now(SMA_IST)
+    open_now = now.weekday() < 5 and dt_time(9, 15) <= now.time() < dt_time(15, 30)
+    return "LIVE" if open_now else "CLOSED", now
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def sma_universe():
+    fallback = [
+        ("NSE","RELIANCE","Reliance Industries Limited","","RELIANCE.NS"),
+        ("NSE","TCS","Tata Consultancy Services Limited","","TCS.NS"),
+        ("NSE","INFY","Infosys Limited","","INFY.NS"),
+        ("NSE","HDFCBANK","HDFC Bank Limited","","HDFCBANK.NS"),
+        ("NSE","ICICIBANK","ICICI Bank Limited","","ICICIBANK.NS"),
+        ("NSE","SBIN","State Bank of India","","SBIN.NS"),
+        ("NSE","ITC","ITC Limited","","ITC.NS"),
+        ("NSE","BHARTIARTL","Bharti Airtel Limited","","BHARTIARTL.NS"),
+        ("NSE","LT","Larsen & Toubro Limited","","LT.NS"),
+        ("NSE","WIPRO","Wipro Limited","","WIPRO.NS"),
+        ("NSE","HCLTECH","HCL Technologies Limited","","HCL Technologies Limited"),
+        ("NSE","MARUTI","Maruti Suzuki India Limited","","MARUTI.NS"),
+        ("NSE","SUNPHARMA","Sun Pharmaceutical Industries Limited","","SUNPHARMA.NS"),
+        ("NSE","TATASTEEL","Tata Steel Limited","","TATASTEEL.NS"),
+        ("NSE","TATAMOTORS","Tata Motors Limited","","TATAMOTORS.NS"),
+    ]
+    frames=[]
+    try:
+        r=SMA_SESSION.get('https://archives.nseindia.com/content/equities/EQUITY_L.csv',timeout=25)
+        r.raise_for_status()
+        d=pd.read_csv(io.BytesIO(r.content)); d.columns=[str(c).strip().upper() for c in d.columns]
+        if 'SYMBOL' in d.columns and 'NAME OF COMPANY' in d.columns:
+            frames.append(pd.DataFrame([{'exchange':'NSE','symbol':str(x['SYMBOL']).strip(),'company':str(x['NAME OF COMPANY']).strip(),'code':'','yahoo':f"{str(x['SYMBOL']).strip()}.NS"} for _,x in d.iterrows() if str(x['SYMBOL']).strip().lower()!='nan']))
+    except Exception: pass
+    try:
+        r=SMA_SESSION.get('https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w',params={'scripcode':'','Group':'','industry':'','segment':'Equity','status':'Active'},headers={'Referer':'https://www.bseindia.com/'},timeout=30)
+        r.raise_for_status(); data=r.json(); rows=data.get('Table',data if isinstance(data,list) else [])
+        b=[]
+        for x in rows:
+            code=str(x.get('SCRIP_CD') or x.get('scripcode') or x.get('Scripcode') or x.get('SCRIP_CODE') or '').strip()
+            company=str(x.get('NAME') or x.get('Scrip_Name') or x.get('scripname') or x.get('CompanyName') or '').strip()
+            symbol=str(x.get('SYMBOL') or x.get('symbol') or '').strip()
+            if code.isdigit() and company and company.lower()!='nan': b.append({'exchange':'BSE','symbol':symbol or code,'company':company,'code':code,'yahoo':f'{code.zfill(6)}.BO'})
+        if b: frames.append(pd.DataFrame(b))
+    except Exception: pass
+    if not frames: return pd.DataFrame(fallback,columns=['exchange','symbol','company','code','yahoo'])
+    f=pd.concat(frames,ignore_index=True); fb=pd.DataFrame(fallback,columns=['exchange','symbol','company','code','yahoo'])
+    return pd.concat([f,fb],ignore_index=True).drop_duplicates(['exchange','yahoo']).sort_values(['exchange','symbol']).reset_index(drop=True)
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def sma_quote(ticker):
+    try:
+        r=SMA_SESSION.get(f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}',params={'range':'5d','interval':'1d','includePrePost':'false','events':'div,splits'},timeout=15)
+        r.raise_for_status(); result=(r.json().get('chart',{}).get('result') or [None])[0]
+        if not result: return None
+        meta=result.get('meta',{}) or {}; q=(result.get('indicators',{}).get('quote') or [{}])[0]
+        opens=q.get('open') or []; highs=q.get('high') or []; lows=q.get('low') or []; closes=q.get('close') or []
+        price=sma_num(meta.get('regularMarketPrice')) or (sma_num(closes[-1]) if closes else None)
+        prev=sma_num(meta.get('previousClose')) or sma_num(meta.get('chartPreviousClose'))
+        valid=[(i,sma_num(c)) for i,c in enumerate(closes) if sma_num(c) is not None]
+        last_i,last_close=valid[-1] if valid else (None,None)
+        op=sma_num(meta.get('regularMarketOpen')); hi=sma_num(meta.get('regularMarketDayHigh')); lo=sma_num(meta.get('regularMarketDayLow'))
+        if last_i is not None:
+            op=op or (sma_num(opens[last_i]) if last_i<len(opens) else None); hi=hi or (sma_num(highs[last_i]) if last_i<len(highs) else None); lo=lo or (sma_num(lows[last_i]) if last_i<len(lows) else None)
+        if prev is None and len(valid)>1: prev=valid[-2][1]
+        ch=price-prev if price is not None and prev is not None else None
+        cp=ch/prev*100 if ch is not None and prev not in (None,0) else None
+        return {'price':price,'open':op,'close':prev,'high':hi,'low':lo,'change':ch,'change_pct':cp}
+    except Exception: return None
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def sma_history(ticker):
+    try:
+        r=SMA_SESSION.get(f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}',params={'range':'1y','interval':'1d','includePrePost':'false'},timeout=18)
+        r.raise_for_status(); result=(r.json().get('chart',{}).get('result') or [None])[0]
+        if not result: return pd.DataFrame()
+        ts=result.get('timestamp') or []; q=(result.get('indicators',{}).get('quote') or [{}])[0]
+        return pd.DataFrame({'date':pd.to_datetime(ts,unit='s',utc=True),'open':q.get('open') or [],'high':q.get('high') or [],'low':q.get('low') or [],'close':q.get('close') or []}).dropna(subset=['close']).set_index('date')
+    except Exception: return pd.DataFrame()
+
+
+def sma_analysis(ticker, quote=None):
+    q=quote or sma_quote(ticker)
+    h=sma_history(ticker)
+    if q is None: return None
+    if h.empty:
+        price=q['price']; est=price; conf=45.0; signal='HOLD'; reasons=['Live quote available; technical history is temporarily unavailable.']
+        return {**q,'estimated':est,'confidence':conf,'signal':signal,'reasons':reasons,'history':h}
+    c=h['close']; sma20=c.rolling(20).mean().iloc[-1]; sma50=c.rolling(50).mean().iloc[-1]; ret20=(c.iloc[-1]/c.iloc[-21]-1)*100 if len(c)>21 else 0.0
+    d=c.diff(); gain=d.clip(lower=0).rolling(14).mean(); loss=(-d.clip(upper=0)).rolling(14).mean(); rs=gain/loss.replace(0,np.nan); rsi=(100-(100/(1+rs))).iloc[-1]
+    price=q['price'] or c.iloc[-1]; trend=(price/sma20-1)*100 if sma20 else 0; momentum=max(-12,min(12,ret20*0.35)); est=price*(1+momentum/100)
+    score=0; reasons=[]
+    if price>sma20: score+=1; reasons.append('Price is above the 20-day average, showing positive short-term trend.')
+    else: score-=1; reasons.append('Price is below the 20-day average, showing weaker short-term trend.')
+    if sma20>sma50: score+=1; reasons.append('20-day average is above the 50-day average.')
+    else: score-=1; reasons.append('20-day average is below the 50-day average.')
+    if rsi<35: score+=1; reasons.append(f'RSI is {rsi:.1f}, indicating an oversold condition.')
+    elif rsi>70: score-=1; reasons.append(f'RSI is {rsi:.1f}, indicating an overbought condition.')
+    else: reasons.append(f'RSI is {rsi:.1f}, inside a neutral range.')
+    signal='BUY' if score>=2 else ('SELL' if score<=-2 else 'HOLD'); conf=min(95,max(50,58+abs(score)*10+min(15,abs(ret20))))
+    return {**q,'estimated':est,'confidence':conf,'signal':signal,'reasons':reasons,'history':h,'sma20':sma20,'sma50':sma50,'rsi':rsi,'momentum':ret20}
+
+
+def sma_find(text, exchange=None):
+    u=sma_universe(); t=str(text).strip().upper()
+    if not t: return pd.DataFrame()
+    m=u[u['symbol'].astype(str).str.upper().str.contains(t,na=False) | u['company'].astype(str).str.upper().str.contains(t,na=False)].copy()
+    if exchange and exchange!='ALL': m=m[m.exchange==exchange]
+    return m.head(20)
+
+
+def sma_market_cards():
+    items=[('NIFTY 50','^NSEI'),('BANK NIFTY','^NSEBANK'),('SENSEX','^BSESN')]
+    out=[]
+    for name,t in items:
+        q=sma_quote(t); out.append((name,q))
+    return out
+
+
+def sma_quote_many(rows):
+    def one(row):
+        q=sma_quote(row.yahoo); return {**row.to_dict(),**(q or {})}
+    out=[]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        fs=[ex.submit(one,row) for _,row in rows.iterrows()]
+        for f in fs:
+            try: out.append(f.result())
+            except Exception: pass
+    return pd.DataFrame(out)
+
+
+def sma_signal_html(signal):
+    cls={'BUY':'badge-buy','SELL':'badge-sell','HOLD':'badge-hold'}.get(signal,'badge-hold')
+    return f'<span class="badge {cls}">{signal}</span>'
+
+
+def sma_stock_card(row, compact=False):
+    q=row if isinstance(row,dict) else row.to_dict(); sig=q.get('signal','HOLD'); cp=q.get('change_pct')
+    st.markdown(f'''<div class="stock-card"><div class="stock-name">{q.get('symbol','—')}</div><div class="stock-company">{q.get('company','—')}</div><div class="stock-price">{sma_money(q.get('price'))}</div><div class="stock-meta">{sma_pct(cp)} today · Est. {sma_money(q.get('estimated'))}</div><div style="margin-top:9px">{sma_signal_html(sig)}</div><div class="conf">Confidence {float(q.get('confidence',0)):.0f}%</div></div>''',unsafe_allow_html=True)
+
+
+def sma_render_home():
+    status, now=sma_market_status()
+    st.markdown('<div class="brand">SMA</div>',unsafe_allow_html=True)
+    a,b=st.columns([9,1])
+    with a: st.markdown(f'<div class="page-title">Good morning</div>',unsafe_allow_html=True)
+    with b:
+        if st.button('⌕',key='home_search_btn',help='Search a stock',use_container_width=True): st.session_state['home_search_open']=not st.session_state.get('home_search_open',False)
+    st.markdown(f'<div class="page-sub">Indian market dashboard · <b>{status}</b> · {now.strftime("%d %b %Y, %I:%M %p IST")}</div>',unsafe_allow_html=True)
+    if st.session_state.get('home_search_open',False):
+        st.markdown('<div class="search-box">',unsafe_allow_html=True)
+        text=st.text_input('Search stocks',placeholder='Search by stock name or symbol…',label_visibility='collapsed',key='home_search')
+        if text:
+            m=sma_find(text)
+            if m.empty: st.info('No matching stock found.')
+            else:
+                for _,r in m.head(8).iterrows():
+                    c1,c2=st.columns([5,1])
+                    c1.write(f"**{r.symbol}** · {r.company}")
+                    if c2.button('Open',key=f"home_open_{r.exchange}_{r.symbol}"): st.session_state['analysis_query']=r.symbol; st.session_state['page']='Analysis'; st.rerun()
+        st.markdown('</div>',unsafe_allow_html=True)
+
+    # Navigation directly below Good morning/search.
+    nav=st.radio('Navigation',['Home','All Stocks','Analysis'],index=['Home','All Stocks','Analysis'].index(st.session_state.get('page','Home')),horizontal=True,label_visibility='collapsed',key='home_nav')
+    st.session_state['page']=nav
+    if nav!='Home': return
+
+    st.markdown('<div class="section-title">Markets</div>',unsafe_allow_html=True)
+    cards=sma_market_cards(); html='<div class="market-strip">'
+    for name,q in cards:
+        val=sma_money(q.get('price') if q else None); ch=sma_pct(q.get('change_pct') if q else None); cls='up' if q and (q.get('change_pct') or 0)>=0 else 'down'
+        html+=f'<div class="market-chip"><div class="mname">{name}</div><div class="mvalue">{val}</div><div class="mchange {cls}">{ch}</div></div>'
+    html+='</div>'; st.markdown(html,unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">Stocks to watch · Best gainers</div>',unsafe_allow_html=True)
+    watch=sma_universe(); watch=watch[watch.exchange=='NSE'].copy(); popular=['RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','BHARTIARTL','LT','WIPRO','HCLTECH','MARUTI','SUNPHARMA','TATASTEEL','TATAMOTORS','BAJFINANCE','AXISBANK','KOTAKBANK','TITAN','BEL']
+    watch=watch[watch.symbol.isin(popular)].drop_duplicates('symbol')
+    d=sma_quote_many(watch); d=d.dropna(subset=['change_pct'],how='all').sort_values('change_pct',ascending=False).head(6)
+    if d.empty: st.info('Market data is temporarily unavailable.')
+    else:
+        cols=st.columns(3)
+        for i,(_,r) in enumerate(d.iterrows()):
+            with cols[i%3]:
+                sma_stock_card(r)
+
+
+def sma_render_all():
+    st.markdown('<div class="brand">SMA</div><div class="page-title">All stocks</div><div class="page-sub">NSE + BSE listed equity universe</div>',unsafe_allow_html=True)
+    nav=st.radio('Navigation',['Home','All Stocks','Analysis'],index=1,horizontal=True,label_visibility='collapsed',key='all_nav'); st.session_state['page']=nav
+    if nav!='All Stocks': return
+    u=sma_universe(); a,b,c=st.columns([3,1,1]);
+    with a: search=st.text_input('Search',placeholder='Search stock name or symbol…',label_visibility='collapsed',key='all_search')
+    with b: ex=st.selectbox('Exchange',['ALL','NSE','BSE'],label_visibility='collapsed',key='all_exchange')
+    with c: page_size=st.selectbox('Rows',[20,40,60],index=0,label_visibility='collapsed',key='all_size')
+    if search: u=u[u.symbol.astype(str).str.contains(search.upper(),na=False)|u.company.astype(str).str.upper().str.contains(search.upper(),na=False)]
+    if ex!='ALL': u=u[u.exchange==ex]
+    total=len(u); pages=max(1,math.ceil(total/page_size)); page=st.number_input(f'Page / {pages}',1,pages,1,key='all_page')
+    start=(page-1)*page_size; view=u.iloc[start:start+page_size].copy(); data=sma_quote_many(view)
+    if data.empty: st.warning('No live/last-traded data returned for this page.')
+    else:
+        data['estimated']=data.apply(lambda r: sma_analysis(r.yahoo,r.to_dict())['estimated'] if pd.notna(r.get('price')) else None,axis=1)
+        data['confidence']=data.apply(lambda r: sma_analysis(r.yahoo,r.to_dict())['confidence'] if pd.notna(r.get('price')) else None,axis=1)
+        cols=['symbol','company','exchange','price','estimated','open','close','high','low','confidence','change_pct']; labels={'symbol':'Symbol','company':'Company','exchange':'Exchange','price':'Current','estimated':'Estimated','open':'Open','close':'Close','high':'High','low':'Low','confidence':'Confidence %','change_pct':'Change %'}
+        out=data[cols].rename(columns=labels); st.dataframe(out,use_container_width=True,hide_index=True,column_config={'Current':st.column_config.NumberColumn(format='₹%.2f'),'Estimated':st.column_config.NumberColumn(format='₹%.2f'),'Open':st.column_config.NumberColumn(format='₹%.2f'),'Close':st.column_config.NumberColumn(format='₹%.2f'),'High':st.column_config.NumberColumn(format='₹%.2f'),'Low':st.column_config.NumberColumn(format='₹%.2f'),'Confidence %':st.column_config.NumberColumn(format='%.0f%%'),'Change %':st.column_config.NumberColumn(format='%.2f%%')})
+
+
+def sma_render_analysis():
+    st.markdown('<div class="brand">SMA</div><div class="page-title">Analysis</div><div class="page-sub">Search a stock to view complete market data and analysis.</div>',unsafe_allow_html=True)
+    nav=st.radio('Navigation',['Home','All Stocks','Analysis'],index=2,horizontal=True,label_visibility='collapsed',key='analysis_nav'); st.session_state['page']=nav
+    if nav!='Analysis': return
+    query=st.text_input('Search stock',value=st.session_state.get('analysis_query',''),placeholder='Search stock name or symbol…',label_visibility='collapsed',key='analysis_search')
+    if not query: st.info('Search a stock to begin.') ; return
+    m=sma_find(query)
+    if m.empty: st.warning('Stock not found. Try the exact NSE/BSE symbol or company name.'); return
+    if len(m)>1:
+        choice=st.selectbox('Select stock',[f"{r.exchange} · {r.symbol} · {r.company}" for _,r in m.iterrows()],key='analysis_choice'); row=m.iloc[[i for i,s in enumerate([f"{r.exchange} · {r.symbol} · {r.company}" for _,r in m.iterrows()]) if s==choice][0]]
+    else: row=m.iloc[0]
+    a=sma_analysis(row.yahoo)
+    if not a: st.error('Market data unavailable for this stock.'); return
+    st.markdown(f'<div class="hero"><div class="hero-title">{row.symbol}</div><div class="hero-sub">{row.company} · {row.exchange}</div><div class="stock-price">{sma_money(a["price"])} <span style="font-size:14px" class="{"up" if (a.get("change_pct") or 0)>=0 else "down"}">{sma_pct(a.get("change_pct"))}</span></div><div style="margin-top:12px">{sma_signal_html(a["signal"])} <span class="conf" style="margin-left:8px">Confidence {a["confidence"]:.0f}% · Estimated {sma_money(a["estimated"])}</span></div></div>',unsafe_allow_html=True)
+    vals=[('Open',a.get('open')),('Close',a.get('close')),('High',a.get('high')),('Low',a.get('low')),('SMA 20',a.get('sma20')),('SMA 50',a.get('sma50')),('RSI',a.get('rsi'))]
+    cols=st.columns(4)
+    for i,(label,val) in enumerate(vals):
+        with cols[i%4]: st.metric(label,'—' if val is None else (f'{val:.2f}' if label=='RSI' else sma_money(val)))
+    h=a.get('history',pd.DataFrame())
+    if not h.empty:
+        fig=go.Figure(go.Scatter(x=h.index,y=h.close,mode='lines',name=row.symbol)); fig.update_layout(height=340,margin=dict(l=0,r=0,t=10,b=0),paper_bgcolor='white',plot_bgcolor='white'); st.plotly_chart(fig,use_container_width=True)
+    st.markdown('<div class="section-title">Why this signal?</div>',unsafe_allow_html=True)
+    for reason in a.get('reasons',[]): st.markdown(f'<div class="reason">{reason}</div>',unsafe_allow_html=True)
+
+
+# Requested top-level order: SMA + Good morning + search, then navigation.
+if 'page' not in st.session_state: st.session_state['page']='Home'
+_current=st.session_state.get('page','Home')
+if _current=='All Stocks': sma_render_all()
+elif _current=='Analysis': sma_render_analysis()
+else: sma_render_home()
+st.stop()
+'''
+          s = s.replace(marker, override + '\n\n' + marker, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit patched app
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Fix SMA home layout and market status' || exit 0
+          git push
+      - name: Remove patch workflow
+        if: always()
+        run: |
+          rm -f .github/workflows/ui-fix.yml
+          git add -A
+          git commit -m 'Remove temporary UI patch workflow' || exit 0
+          git push
