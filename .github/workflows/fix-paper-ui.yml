@@ -1,0 +1,55 @@
+name: Fix Paper Trading Mobile UI
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-paper-ui.yml'
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix mobile visibility and controls
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+          marker = '/* Mobile responsive layout */'
+          if marker not in s:
+              raise SystemExit('Mobile CSS marker not found')
+          css = '''
+/* Paper Trading / Streamlit mobile visibility fixes */
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] * { color:#171717 !important; opacity:1 !important; }
+[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * { color:#77736d !important; opacity:1 !important; }
+[data-testid="stMetricDelta"], [data-testid="stMetricDelta"] * { opacity:1 !important; }
+.stButton > button { color:#171717 !important; background:#ffffff !important; border:1px solid #e9e3da !important; }
+.stButton > button[kind="primary"], .stButton > button[data-testid="baseButton-primary"] { color:#ffffff !important; background:#171717 !important; border-color:#171717 !important; }
+.stTextInput input, .stNumberInput input, [data-baseweb="select"] { color:#171717 !important; background:#ffffff !important; }
+.stTextInput input::placeholder { color:#77736d !important; opacity:1 !important; }
+.bottom-nav label { color:#171717 !important; }
+.bottom-nav label:has(input:checked) { color:#ffffff !important; background:#171717 !important; }
+@media (max-width:430px) {
+  .block-container { padding:12px 10px 100px !important; }
+  [data-testid="stHorizontalBlock"] { gap:8px !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { min-width:100% !important; width:100% !important; flex:1 1 100% !important; }
+  [data-testid="stMetricValue"] { font-size:20px !important; }
+  .stButton > button { min-height:42px !important; }
+}
+'''
+          if 'Paper Trading / Streamlit mobile visibility fixes' not in s:
+              s = s.replace(marker, css + '\n' + marker, 1)
+          p.write_text(s)
+          PY
+      - name: Validate
+        run: python -m py_compile app.py modules/paper_trading.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git diff --cached --quiet || git commit -m 'Fix paper trading mobile visibility'
+          git push
