@@ -9,8 +9,6 @@ STARTING_CASH = 100000.0
 STORAGE_KEY = "sma_paper_trading_v1"
 
 
-@st.cache_resource
-
 def _local_storage():
     return LocalStorage()
 
@@ -38,7 +36,6 @@ def _persist():
     try:
         _local_storage().setItem(STORAGE_KEY, json.dumps(payload, ensure_ascii=False))
     except Exception:
-        # The app still works with Streamlit session state if browser storage is unavailable.
         pass
 
 
