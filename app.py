@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import plotly.graph_objects as go
+from modules.paper_trading import render_paper_trading_page
 
 st.set_page_config(
     page_title="SMA · Stock Market Analysis",
@@ -502,14 +503,16 @@ def home_page():
 
     # Navigation sits directly below Good Morning/search.
     st.markdown('<div class="section-title" style="margin-top:20px">Home – All Stocks Analysis</div>', unsafe_allow_html=True)
-    options = ["Home", "All Stocks", "Analysis"]
+    options = ["Home", "All Stocks", "Analysis", "Paper Trading"]
     nav = st.radio("Navigation", options, index=options.index(st.session_state.get("page", "Home")), horizontal=True, label_visibility="collapsed", key="home_navigation")
     st.session_state["page"] = nav
     if nav != "Home":
         if nav == "All Stocks":
             all_stocks_page()
-        else:
+        elif nav == "Analysis":
             analysis_page()
+        else:
+            render_paper_trading_page(resolve_stock, stock_snapshot)
         return
 
     # Only NIFTY and SENSEX on the Home page, with live/last-close values.
@@ -702,7 +705,7 @@ def analysis_page():
 
 def navigation():
     st.markdown('<div class="bottom-nav">', unsafe_allow_html=True)
-    options = ["Home", "All Stocks", "Analysis"]
+    options = ["Home", "All Stocks", "Analysis", "Paper Trading"]
     current = st.session_state.get("page", "Home")
     selected = st.radio("Navigation", options, index=options.index(current), horizontal=True, label_visibility="collapsed", key="bottom_navigation")
     st.session_state["page"] = selected
@@ -717,8 +720,10 @@ if page == "Home":
     home_page()
 elif page == "All Stocks":
     all_stocks_page()
-else:
+elif page == "Analysis":
     analysis_page()
+else:
+    render_paper_trading_page(resolve_stock, stock_snapshot)
 
 navigation()
 
