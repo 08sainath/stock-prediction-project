@@ -71,6 +71,45 @@ footer { visibility:hidden; }
 .bottom-nav label:has(input:checked) { background:#171717; color:#fff; }
 button[kind="secondary"] { border-color:var(--line)!important; }
 [data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:16px; overflow:hidden; }
+
+/* Mobile responsive layout */
+@media (max-width: 768px) {
+  .block-container { padding: 14px 12px 96px !important; max-width: 100% !important; }
+  .page-title { font-size: 26px !important; }
+  .hero { padding: 18px !important; border-radius: 18px !important; }
+  .hero-title { font-size: 22px !important; }
+  .market-strip { gap: 8px !important; -webkit-overflow-scrolling: touch; }
+  .market-chip { min-width: 140px !important; }
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; row-gap: 8px !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    min-width: calc(50% - 5px) !important;
+    flex: 1 1 calc(50% - 5px) !important;
+  }
+  .stock-card { min-height: 125px !important; padding: 13px !important; border-radius: 16px !important; }
+  .stock-price { font-size: 20px !important; margin-top: 10px !important; }
+  .data-card { padding: 12px !important; border-radius: 14px !important; }
+  .data-value { font-size: 17px !important; }
+  [data-testid="stDataFrame"] { overflow-x: auto !important; }
+  [data-testid="stDataFrame"] iframe { max-width: 100% !important; }
+  .bottom-nav { bottom: 8px !important; width: calc(100% - 16px) !important; padding: 5px !important; border-radius: 16px !important; }
+  .bottom-nav label { padding: 8px 2px !important; font-size: 10px !important; white-space: nowrap !important; }
+  .bottom-nav [role="radiogroup"] { gap: 2px !important; }
+  .section-title { font-size: 17px !important; margin: 18px 0 9px !important; }
+  .search-box { padding: 9px !important; }
+  .stTextInput input, .stSelectbox div, .stNumberInput input { font-size: 16px !important; }
+  button { min-height: 42px !important; }
+}
+
+@media (max-width: 430px) {
+  .block-container { padding-left: 9px !important; padding-right: 9px !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    min-width: 100% !important;
+    flex-basis: 100% !important;
+  }
+  .bottom-nav label { font-size: 9px !important; padding-left: 0 !important; padding-right: 0 !important; }
+  .market-chip { min-width: 132px !important; }
+}
+
 </style>
 """,
     unsafe_allow_html=True,
