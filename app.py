@@ -704,11 +704,29 @@ def analysis_page():
 
 
 def navigation():
-    st.markdown('<div class="bottom-nav">', unsafe_allow_html=True)
     options = ["Home", "All Stocks", "Analysis", "Paper Trading"]
+
+    def _change_page():
+        st.session_state["page"] = st.session_state["bottom_navigation"]
+
     current = st.session_state.get("page", "Home")
-    selected = st.radio("Navigation", options, index=options.index(current), horizontal=True, label_visibility="collapsed", key="bottom_navigation")
-    st.session_state["page"] = selected
+    if current not in options:
+        current = "Home"
+        st.session_state["page"] = current
+
+    # Keep the widget synchronized with the actual page before rendering it.
+    if st.session_state.get("bottom_navigation") not in options:
+        st.session_state["bottom_navigation"] = current
+
+    st.markdown('<div class="bottom-nav">', unsafe_allow_html=True)
+    st.radio(
+        "Navigation",
+        options,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="bottom_navigation",
+        on_change=_change_page,
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
 
