@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+from modules.mobile_css import render_mobile_paper_css
 
 STARTING_CASH = 100000.0
 
@@ -12,8 +13,6 @@ def _default_portfolio():
 
 
 def _persist():
-    # Keep portfolio state available for the current Streamlit session without
-    # importing an optional browser-storage component that can break deployment.
     st.session_state["paper_saved_payload"] = json.dumps({k: st.session_state.get(k, v) for k, v in _default_portfolio().items()}, ensure_ascii=False)
 
 
@@ -66,6 +65,7 @@ def _remove_watchlist(symbol, exchange):
 
 def render_paper_trading_page(resolve_stock, stock_snapshot):
     _init()
+    render_mobile_paper_css()
     st.markdown('<div class="brand">SMA</div><div class="page-title">Paper Trading</div><div class="page-sub">Search real NSE/BSE stocks, add them to your watchlist, and trade with virtual money using the latest available market quote.</div>', unsafe_allow_html=True)
     holdings = st.session_state["paper_holdings"]
     cash = float(st.session_state["paper_cash"])
