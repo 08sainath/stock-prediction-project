@@ -5,6 +5,7 @@ joblib==1.5.3
 
 streamlit==1.52.1
 altair==6.0.0
+streamlit-local-storage==0.0.25
 
 PyYAML==6.0.1
 python-dateutil==2.9.0.post0
