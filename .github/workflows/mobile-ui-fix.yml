@@ -1,0 +1,37 @@
+name: Mobile UI Fix
+on:
+  push:
+    paths:
+      - '.github/workflows/mobile-ui-fix.yml'
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply mobile CSS
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+          marker = '\n</style>\n""",\n    unsafe_allow_html=True,\n)'
+          css = '''\n\n/* Mobile responsive layout */\n@media (max-width: 768px) {\n  .block-container { padding: 14px 12px 96px !important; max-width: 100% !important; }\n  .page-title { font-size: 26px !important; }\n  .hero { padding: 18px !important; border-radius: 18px !important; }\n  .hero-title { font-size: 22px !important; }\n  .market-strip { gap: 8px !important; -webkit-overflow-scrolling: touch; }\n  .market-chip { min-width: 140px !important; }\n  [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; row-gap: 8px !important; }\n  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {\n    min-width: calc(50% - 5px) !important;\n    flex: 1 1 calc(50% - 5px) !important;\n  }\n  .stock-card { min-height: 125px !important; padding: 13px !important; border-radius: 16px !important; }\n  .stock-price { font-size: 20px !important; margin-top: 10px !important; }\n  .data-card { padding: 12px !important; border-radius: 14px !important; }\n  .data-value { font-size: 17px !important; }\n  [data-testid="stDataFrame"] { overflow-x: auto !important; }\n  [data-testid="stDataFrame"] iframe { max-width: 100% !important; }\n  .bottom-nav { bottom: 8px !important; width: calc(100% - 16px) !important; padding: 5px !important; border-radius: 16px !important; }\n  .bottom-nav label { padding: 8px 2px !important; font-size: 10px !important; white-space: nowrap !important; }\n  .bottom-nav [role="radiogroup"] { gap: 2px !important; }\n  .section-title { font-size: 17px !important; margin: 18px 0 9px !important; }\n  .search-box { padding: 9px !important; }\n  .stTextInput input, .stSelectbox div, .stNumberInput input { font-size: 16px !important; }\n  button { min-height: 42px !important; }\n}\n\n@media (max-width: 430px) {\n  .block-container { padding-left: 9px !important; padding-right: 9px !important; }\n  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {\n    min-width: 100% !important;\n    flex-basis: 100% !important;\n  }\n  .bottom-nav label { font-size: 9px !important; padding-left: 0 !important; padding-right: 0 !important; }\n  .market-chip { min-width: 132px !important; }\n}\n'''
+          if '/* Mobile responsive layout */' not in s:
+              if marker not in s:
+                  raise SystemExit('CSS marker not found')
+              s = s.replace(marker, css + marker, 1)
+          p.write_text(s)
+          PY
+      - name: Validate app
+        run: python -m py_compile app.py modules/paper_trading.py
+      - name: Commit mobile fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git diff --cached --quiet || git commit -m 'Fix mobile responsive layout'
+          git push
