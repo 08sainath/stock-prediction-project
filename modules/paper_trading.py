@@ -1,12 +1,22 @@
-import streamlit as st
-import pandas as pd
+import json
 from datetime import datetime
 
+import pandas as pd
+import streamlit as st
+from streamlit_local_storage import LocalStorage
+
 STARTING_CASH = 100000.0
+STORAGE_KEY = "sma_paper_trading_v1"
 
 
-def _init():
-    defaults = {
+@st.cache_resource
+
+def _local_storage():
+    return LocalStorage()
+
+
+def _default_portfolio():
+    return {
         "paper_cash": STARTING_CASH,
         "paper_holdings": {},
         "paper_orders": [],
@@ -14,9 +24,45 @@ def _init():
         "paper_realized_pnl": 0.0,
         "paper_selected_stock": "",
     }
+
+
+def _persist():
+    payload = {
+        "paper_cash": float(st.session_state.get("paper_cash", STARTING_CASH)),
+        "paper_holdings": st.session_state.get("paper_holdings", {}),
+        "paper_orders": st.session_state.get("paper_orders", []),
+        "paper_watchlist": st.session_state.get("paper_watchlist", []),
+        "paper_realized_pnl": float(st.session_state.get("paper_realized_pnl", 0.0)),
+        "paper_selected_stock": st.session_state.get("paper_selected_stock", ""),
+    }
+    try:
+        _local_storage().setItem(STORAGE_KEY, json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        # The app still works with Streamlit session state if browser storage is unavailable.
+        pass
+
+
+def _init():
+    if st.session_state.get("paper_storage_loaded"):
+        return
+
+    defaults = _default_portfolio()
+    loaded = None
+    try:
+        raw = _local_storage().getItem(STORAGE_KEY)
+        if raw:
+            loaded = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        loaded = None
+
+    if isinstance(loaded, dict):
+        defaults.update({k: loaded[k] for k in defaults if k in loaded})
+
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+    st.session_state["paper_storage_loaded"] = True
 
 
 def _money(v):
@@ -79,8 +125,6 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
     holdings = st.session_state["paper_holdings"]
     cash = float(st.session_state["paper_cash"])
 
-    # A manual refresh forces a new Streamlit run. The app's quote function is already cached briefly,
-    # so this keeps the UI responsive while still reflecting fresh market data.
     r1, r2 = st.columns([1, 5])
     with r1:
         if st.button("↻ Refresh Prices", use_container_width=True):
@@ -92,7 +136,6 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
     with r2:
         st.caption("Quotes are refreshed from the app's market-data source. Paper orders never reach NSE/BSE.")
 
-    # Calculate portfolio using current market prices.
     portfolio_rows = []
     current_value = 0.0
     invested = 0.0
@@ -110,7 +153,7 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
     realized_pnl = float(st.session_state["paper_realized_pnl"])
     total_pnl = unrealized_pnl + realized_pnl
     total_value = cash + current_value
-    return_pct = ((total_pnl) / (invested + max(realized_pnl, 0.0)) * 100) if invested else 0.0
+    return_pct = (total_pnl / invested * 100) if invested else 0.0
 
     m1, m2, m3, m4, m5 = st.columns(5)
     with m1:
@@ -124,7 +167,6 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
     with m5:
         st.metric("Total P&L", _money(total_pnl), _pct(return_pct))
 
-    # ---------------- Stock search / trade ticket ----------------
     st.markdown('<div class="section-title">Search & Trade</div>', unsafe_allow_html=True)
     query = st.text_input(
         "Search stocks",
@@ -156,10 +198,12 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
                 if is_watched:
                     if st.button("★ Watching", use_container_width=True, key="unwatch_search"):
                         _remove_watchlist(match["symbol"], match["exchange"])
+                        _persist()
                         st.rerun()
                 else:
                     if st.button("☆ Add Watchlist", use_container_width=True, key="watch_search"):
                         _add_watchlist(match)
+                        _persist()
                         st.success(f"{match['symbol']} added to Watchlist")
                         st.rerun()
         else:
@@ -205,6 +249,7 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
                     }
                     st.session_state["paper_cash"] -= trade_value
                     _record_order("BUY", match, q, price)
+                    _persist()
                     st.success(f"Bought {q} × {symbol} at {_money(price)}")
                     st.rerun()
 
@@ -223,10 +268,10 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
                         holdings[symbol]["qty"] = remaining
                     st.session_state["paper_cash"] += trade_value
                     _record_order("SELL", match, q, price)
+                    _persist()
                     st.success(f"Sold {q} × {symbol} at {_money(price)} · Realized P&L {_money(realized)}")
                     st.rerun()
 
-    # ---------------- Watchlist ----------------
     st.markdown('<div class="section-title">Watchlist</div>', unsafe_allow_html=True)
     watchlist = st.session_state["paper_watchlist"]
     if not watchlist:
@@ -246,9 +291,9 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
             with c4:
                 if st.button("Remove", key=f"remove_watch_{i}", use_container_width=True):
                     _remove_watchlist(item["symbol"], item["exchange"])
+                    _persist()
                     st.rerun()
 
-    # ---------------- Holdings ----------------
     st.markdown('<div class="section-title">Holdings</div>', unsafe_allow_html=True)
     if not portfolio_rows:
         st.info("No holdings yet. Search a stock and place a virtual BUY order.")
@@ -284,7 +329,6 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
             },
         )
 
-    # ---------------- Order history ----------------
     st.markdown('<div class="section-title">Order History</div>', unsafe_allow_html=True)
     orders = st.session_state["paper_orders"]
     if orders:
@@ -301,14 +345,12 @@ def render_paper_trading_page(resolve_stock, stock_snapshot):
         st.info("No paper orders yet.")
 
     st.markdown(
-        '<div class="small-note" style="margin-top:14px">Paper trading starts with virtual ₹1,00,000. BUY/SELL executions are simulated using the latest available quote; no real NSE/BSE order is placed. Portfolio data is currently stored in the Streamlit session.</div>',
+        '<div class="small-note" style="margin-top:14px">Paper trading starts with virtual ₹1,00,000. BUY/SELL executions are simulated using the latest available quote; no real NSE/BSE order is placed. Watchlist, holdings, cash, orders and P&L are saved in this browser and survive page navigation and browser refresh.</div>',
         unsafe_allow_html=True,
     )
 
     if st.button("Reset Paper Portfolio", use_container_width=True, key="reset_paper"):
-        st.session_state["paper_cash"] = STARTING_CASH
-        st.session_state["paper_holdings"] = {}
-        st.session_state["paper_orders"] = []
-        st.session_state["paper_watchlist"] = []
-        st.session_state["paper_realized_pnl"] = 0.0
+        for key, value in _default_portfolio().items():
+            st.session_state[key] = value
+        _persist()
         st.rerun()
