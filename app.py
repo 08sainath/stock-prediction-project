@@ -669,7 +669,7 @@ def all_stocks_page():
     progress = st.progress(0, text=f"Loading live prices… 0/{len(page_df)}")
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
-            executor.submit(stock_snapshot, row.symbol, row.exchange, row.code, row.company): row
+            executor.submit(stock_snapshot, yahoo_ticker(row.exchange, row.symbol, row.code)): row
             for row in page_df.itertuples(index=False)
         }
         done = 0
