@@ -1,0 +1,42 @@
+name: Add returns columns
+on:
+  push:
+    paths:
+      - '.github/workflows/update-returns-columns.yml'
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update app
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app.py')
+          s=p.read_text()
+          old='''                "Current Price": snap.get("price") if snap else None,\n                "Estimated Price": snap.get("estimated") if snap else None,\n                "Open": snap.get("open") if snap else None,\n                "Close": snap.get("close") if snap else None,\n                "High": snap.get("high") if snap else None,\n                "Low": snap.get("low") if snap else None,\n                "Confidence": snap.get("confidence") if snap else None,\n'''
+          new='''                "Current Price": snap.get("price") if snap else None,\n                "Current Return %": snap.get("change_pct") if snap else None,\n                "Estimated Price": snap.get("estimated") if snap else None,\n                "Estimated Return %": (((snap.get("estimated") / snap.get("price")) - 1) * 100) if snap and snap.get("estimated") is not None and snap.get("price") not in (None, 0) else None,\n                "Open": snap.get("open") if snap else None,\n                "Close": snap.get("close") if snap else None,\n                "High": snap.get("high") if snap else None,\n                "Low": snap.get("low") if snap else None,\n                "Confidence": snap.get("confidence") if snap else None,\n'''
+          if old not in s:
+              raise SystemExit('all-stocks row block not found')
+          s=s.replace(old,new,1)
+          old2='''            "Current Price": st.column_config.NumberColumn("Current Price", format="₹%.2f"),\n            "Estimated Price": st.column_config.NumberColumn("Estimated Price", format="₹%.2f"),\n'''
+          new2='''            "Current Price": st.column_config.NumberColumn("Current Price", format="₹%.2f"),\n            "Current Return %": st.column_config.NumberColumn("Current Return %", format="%.2f%%"),\n            "Estimated Price": st.column_config.NumberColumn("Estimated Price", format="₹%.2f"),\n            "Estimated Return %": st.column_config.NumberColumn("Estimated Return %", format="%.2f%%"),\n'''
+          if old2 not in s:
+              raise SystemExit('column config block not found')
+          s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
+          python -m py_compile app.py
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git diff --cached --quiet || git commit -m "Add current and estimated return percentages"
+          git push
+          git rm -f .github/workflows/update-returns-columns.yml
+          git commit -m "Remove temporary returns workflow"
+          git push
