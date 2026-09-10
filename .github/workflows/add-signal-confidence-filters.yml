@@ -1,0 +1,136 @@
+name: Add Signal Confidence Filters
+on:
+  push:
+    paths:
+      - '.github/workflows/add-signal-confidence-filters.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch all stocks UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+          old = '''    c1, c2, c3 = st.columns([2.2, 1, 1])
+    with c1:
+        query = st.text_input("Search", placeholder="Search symbol or company", label_visibility="collapsed", key="all_search")
+    with c2:
+        exchange = st.selectbox("Exchange", ["All", "NSE", "BSE"], label_visibility="collapsed", key="all_exchange")
+    with c3:
+        sort_by = st.selectbox("Sort", ["Symbol", "Current Price", "Confidence", "Estimated Price"], label_visibility="collapsed", key="all_sort")
+'''
+          new = '''    c1, c2, c3 = st.columns([2.2, 1, 1])
+    with c1:
+        query = st.text_input("Search", placeholder="Search stocks, indices, ETFs…", label_visibility="collapsed", key="all_search")
+    with c2:
+        exchange = st.selectbox("Exchange", ["All", "NSE", "BSE"], label_visibility="collapsed", key="all_exchange")
+    with c3:
+        sort_by = st.selectbox("Sort", ["Symbol", "Current Price", "Current Returns", "Estimated Price", "Estimated Returns", "Signal", "Confidence"], label_visibility="collapsed", key="all_sort")
+
+    with st.expander("Filters", expanded=False):
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            signal_filter = st.selectbox("Signal", ["Any", "BUY", "HOLD", "SELL"], key="all_signal_filter")
+        with f2:
+            confidence_filter = st.selectbox("Confidence", ["Any", "80%+", "70%+", "60%+", "Below 60%"], key="all_conf_filter")
+        with f3:
+            return_filter = st.selectbox("Current Returns", ["Any", "Positive", "Negative"], key="all_return_filter")
+'''
+          if old not in s:
+              raise SystemExit('target controls not found')
+          s = s.replace(old, new, 1)
+          marker = '''    if query.strip():
+        q = query.strip().lower()
+        df = df[df.symbol.astype(str).str.lower().str.contains(q, regex=False, na=False) | df.company.astype(str).str.lower().str.contains(q, regex=False, na=False)]
+    if sort_by == "Symbol": df = df.sort_values("symbol")
+'''
+          replacement = '''    if query.strip():
+        q = query.strip().lower()
+        df = df[df.symbol.astype(str).str.lower().str.contains(q, regex=False, na=False) | df.company.astype(str).str.lower().str.contains(q, regex=False, na=False)]
+    if sort_by == "Symbol": df = df.sort_values("symbol")
+'''
+          if marker not in s:
+              raise SystemExit('target filtering marker not found')
+          # Filters are applied after live snapshots so they use the real signal/confidence/return values.
+          old_table = '''                "Current Price": snap.get("price") if snap else None,
+                "Estimated Price": snap.get("estimated") if snap else None,
+                "Open": snap.get("open") if snap else None,
+                "Close": snap.get("close") if snap else None,
+                "High": snap.get("high") if snap else None,
+                "Low": snap.get("low") if snap else None,
+                "Confidence": snap.get("confidence") if snap else None,
+                "Signal": snap.get("signal") if snap else None,
+'''
+          new_table = '''                "Current Price": snap.get("price") if snap else None,
+                "Current Returns": snap.get("change_pct") if snap else None,
+                "Estimated Price": snap.get("estimated") if snap else None,
+                "Estimated Returns": (((snap.get("estimated") / snap.get("price")) - 1) * 100) if snap and snap.get("estimated") is not None and snap.get("price") not in (None, 0) else None,
+                "Open": snap.get("open") if snap else None,
+                "Close": snap.get("close") if snap else None,
+                "High": snap.get("high") if snap else None,
+                "Low": snap.get("low") if snap else None,
+                "Signal": snap.get("signal") if snap else None,
+                "Confidence": snap.get("confidence") if snap else None,
+'''
+          if old_table not in s:
+              raise SystemExit('target table fields not found')
+          s = s.replace(old_table, new_table, 1)
+          sort_block = '''    if sort_by == "Current Price": table = table.sort_values("Current Price", na_position="last", ascending=False)
+    elif sort_by == "Confidence": table = table.sort_values("Confidence", na_position="last", ascending=False)
+    elif sort_by == "Estimated Price": table = table.sort_values("Estimated Price", na_position="last", ascending=False)
+'''
+          sort_new = '''    if return_filter == "Positive": table = table[table["Current Returns"] > 0]
+    elif return_filter == "Negative": table = table[table["Current Returns"] < 0]
+    if signal_filter != "Any": table = table[table["Signal"] == signal_filter]
+    if confidence_filter != "Any":
+        if confidence_filter == "80%+": table = table[table["Confidence"] >= 80]
+        elif confidence_filter == "70%+": table = table[table["Confidence"] >= 70]
+        elif confidence_filter == "60%+": table = table[table["Confidence"] >= 60]
+        else: table = table[table["Confidence"] < 60]
+    if sort_by == "Current Price": table = table.sort_values("Current Price", na_position="last", ascending=False)
+    elif sort_by == "Current Returns": table = table.sort_values("Current Returns", na_position="last", ascending=False)
+    elif sort_by == "Confidence": table = table.sort_values("Confidence", na_position="last", ascending=False)
+    elif sort_by == "Estimated Price": table = table.sort_values("Estimated Price", na_position="last", ascending=False)
+    elif sort_by == "Estimated Returns": table = table.sort_values("Estimated Returns", na_position="last", ascending=False)
+    elif sort_by == "Signal": table = table.sort_values("Signal", na_position="last")
+'''
+          if sort_block not in s:
+              raise SystemExit('sort block not found')
+          s = s.replace(sort_block, sort_new, 1)
+          config_old = '''            "Current Price": st.column_config.NumberColumn("Current Price", format="₹%.2f"),
+            "Estimated Price": st.column_config.NumberColumn("Estimated Price", format="₹%.2f"),
+            "Open": st.column_config.NumberColumn("Open", format="₹%.2f"),
+            "Close": st.column_config.NumberColumn("Close", format="₹%.2f"),
+            "High": st.column_config.NumberColumn("High", format="₹%.2f"),
+            "Low": st.column_config.NumberColumn("Low", format="₹%.2f"),
+            "Confidence": st.column_config.NumberColumn("Confidence", format="%d%%"),
+'''
+          config_new = '''            "Current Price": st.column_config.NumberColumn("Current Price", format="₹%.2f"),
+            "Current Returns": st.column_config.NumberColumn("Current Returns", format="%.2f%%"),
+            "Estimated Price": st.column_config.NumberColumn("Estimated Price", format="₹%.2f"),
+            "Estimated Returns": st.column_config.NumberColumn("Estimated Returns", format="%.2f%%"),
+            "Open": st.column_config.NumberColumn("Open", format="₹%.2f"),
+            "Close": st.column_config.NumberColumn("Close", format="₹%.2f"),
+            "High": st.column_config.NumberColumn("High", format="₹%.2f"),
+            "Low": st.column_config.NumberColumn("Low", format="₹%.2f"),
+            "Signal": st.column_config.TextColumn("Signal"),
+            "Confidence": st.column_config.NumberColumn("Confidence", format="%d%%"),
+'''
+          if config_old not in s:
+              raise SystemExit('column config not found')
+          s = s.replace(config_old, config_new, 1)
+          p.write_text(s)
+          PY
+          python -m py_compile app.py
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Add signal confidence filters and returns" || exit 0
+          git push
