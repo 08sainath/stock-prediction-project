@@ -602,22 +602,57 @@ def home_page():
 
 
 def all_stocks_page():
-    st.markdown('<div class="brand">SMA</div><div class="page-title">All stocks</div><div class="page-sub">Complete active NSE + BSE universe with the same quote fields for every row.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand">SMA</div><div class="page-title">All stocks</div><div class="page-sub">Live NSE + BSE stock screener with returns, estimated returns, signal and confidence.</div>', unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns([2.2, 1, 1])
+    c1, c2 = st.columns([3, 1])
     with c1:
         query = st.text_input("Search", placeholder="Search symbol or company", label_visibility="collapsed", key="all_search")
     with c2:
         exchange = st.selectbox("Exchange", ["All", "NSE", "BSE"], label_visibility="collapsed", key="all_exchange")
-    with c3:
-        sort_by = st.selectbox("Sort", ["Symbol", "Current Price", "Confidence", "Estimated Price"], label_visibility="collapsed", key="all_sort")
+
+    with st.expander("Filters", expanded=True):
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            signal_filter = st.selectbox("Signal", ["Any", "BUY", "HOLD", "SELL"], key="all_signal_filter")
+        with f2:
+            confidence_filter = st.selectbox("Confidence", ["Any", "80%+", "70%+", "60%+", "Below 60%"], key="all_confidence_filter")
+        with f3:
+            current_return_filter = st.selectbox("Current Returns", ["Any", "Positive", "Negative"], key="all_current_return_filter")
+        with f4:
+            estimated_return_filter = st.selectbox("Estimated Returns", ["Any", "Positive", "Negative"], key="all_estimated_return_filter")
+
+        a1, a2, a3 = st.columns([1, 1, 2])
+        with a1:
+            min_price = st.number_input("Min Price (₹)", min_value=0.0, value=0.0, step=10.0, key="all_min_price")
+        with a2:
+            max_price = st.number_input("Max Price (₹)", min_value=0.0, value=0.0, step=10.0, key="all_max_price")
+        with a3:
+            sort_by = st.selectbox("Sort by", ["Symbol (A-Z)", "Current Price", "Current Return %", "Estimated Price", "Estimated Return %", "Confidence"], key="all_sort")
+
+        b1, b2 = st.columns([1, 1])
+        with b1:
+            apply_filters = st.button("Apply Filters", type="primary", use_container_width=True, key="all_apply_filters")
+        with b2:
+            reset_filters = st.button("Reset", use_container_width=True, key="all_reset_filters")
+
+    if reset_filters:
+        st.session_state["all_signal_filter"] = "Any"
+        st.session_state["all_confidence_filter"] = "Any"
+        st.session_state["all_current_return_filter"] = "Any"
+        st.session_state["all_estimated_return_filter"] = "Any"
+        st.session_state["all_min_price"] = 0.0
+        st.session_state["all_max_price"] = 0.0
+        st.rerun()
 
     df = UNIVERSE.copy()
-    if exchange != "All": df = df[df.exchange == exchange]
+    if exchange != "All":
+        df = df[df.exchange == exchange]
     if query.strip():
         q = query.strip().lower()
-        df = df[df.symbol.astype(str).str.lower().str.contains(q, regex=False, na=False) | df.company.astype(str).str.lower().str.contains(q, regex=False, na=False)]
-    if sort_by == "Symbol": df = df.sort_values("symbol")
+        df = df[
+            df.symbol.astype(str).str.lower().str.contains(q, regex=False, na=False)
+            | df.company.astype(str).str.lower().str.contains(q, regex=False, na=False)
+        ]
 
     st.markdown(f'<div class="small-note">{len(df):,} stocks in this view · Live OHLC data is loaded page-by-page to avoid rate limits.</div>', unsafe_allow_html=True)
     if df.empty:
@@ -625,20 +660,25 @@ def all_stocks_page():
         return
 
     page_size = 60
-    max_page = max(1, math.ceil(len(df) / page_size))
-    page = st.number_input("Page", min_value=1, max_value=max_page, value=1, step=1)
-    page_df = df.iloc[(page - 1) * page_size : page * page_size].copy()
+    total_pages = max(1, math.ceil(len(df) / page_size))
+    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="all_page")
+    start_i = (page - 1) * page_size
+    page_df = df.iloc[start_i:start_i + page_size]
 
-    # The page is fully populated with the requested fields. Each row is fetched once and cached.
     rows = []
-    progress = st.progress(0, text="Loading live market data…")
-    items = list(page_df.iterrows())
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures = {pool.submit(stock_snapshot, row.yahoo): (idx, row) for idx, row in items}
+    progress = st.progress(0, text=f"Loading live prices… 0/{len(page_df)}")
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(stock_snapshot, row.symbol, row.exchange, row.code, row.company): row
+            for row in page_df.itertuples(index=False)
+        }
         done = 0
         for future in as_completed(futures):
-            idx, row = futures[future]
-            snap = future.result()
+            row = futures[future]
+            try:
+                snap = future.result()
+            except Exception:
+                snap = None
             rows.append({
                 "Symbol": row.symbol,
                 "Company": row.company,
@@ -655,33 +695,73 @@ def all_stocks_page():
                 "Signal": snap.get("signal") if snap else None,
             })
             done += 1
-            progress.progress(done / max(1, len(items)), text=f"Loading live market data… {done}/{len(items)}")
+            progress.progress(done / max(1, len(page_df)), text=f"Loading live prices… {done}/{len(page_df)}")
     progress.empty()
 
     table = pd.DataFrame(rows)
-    if sort_by == "Current Price": table = table.sort_values("Current Price", na_position="last", ascending=False)
-    elif sort_by == "Confidence": table = table.sort_values("Confidence", na_position="last", ascending=False)
-    elif sort_by == "Estimated Price": table = table.sort_values("Estimated Price", na_position="last", ascending=False)
+    if table.empty:
+        st.info("No live quote data is available for this page.")
+        return
 
-    # Keep the dataframe numeric for correct sorting/display, with clear names.
+    # Apply filters to live quote data only after it has been loaded.
+    if current_return_filter == "Positive":
+        table = table[table["Current Return %"] > 0]
+    elif current_return_filter == "Negative":
+        table = table[table["Current Return %"] < 0]
+
+    if estimated_return_filter == "Positive":
+        table = table[table["Estimated Return %"] > 0]
+    elif estimated_return_filter == "Negative":
+        table = table[table["Estimated Return %"] < 0]
+
+    if signal_filter != "Any":
+        table = table[table["Signal"].astype(str).str.upper() == signal_filter]
+
+    if confidence_filter == "80%+":
+        table = table[table["Confidence"] >= 80]
+    elif confidence_filter == "70%+":
+        table = table[table["Confidence"] >= 70]
+    elif confidence_filter == "60%+":
+        table = table[table["Confidence"] >= 60]
+    elif confidence_filter == "Below 60%":
+        table = table[table["Confidence"] < 60]
+
+    if min_price > 0:
+        table = table[table["Current Price"] >= min_price]
+    if max_price > 0:
+        table = table[table["Current Price"] <= max_price]
+
+    if sort_by == "Symbol (A-Z)":
+        table = table.sort_values("Symbol", na_position="last", ascending=True)
+    elif sort_by == "Current Price":
+        table = table.sort_values("Current Price", na_position="last", ascending=False)
+    elif sort_by == "Current Return %":
+        table = table.sort_values("Current Return %", na_position="last", ascending=False)
+    elif sort_by == "Estimated Price":
+        table = table.sort_values("Estimated Price", na_position="last", ascending=False)
+    elif sort_by == "Estimated Return %":
+        table = table.sort_values("Estimated Return %", na_position="last", ascending=False)
+    elif sort_by == "Confidence":
+        table = table.sort_values("Confidence", na_position="last", ascending=False)
+
+    st.markdown(f'<div class="small-note">Showing {len(table):,} matching stocks on this page.</div>', unsafe_allow_html=True)
     st.dataframe(
         table,
         use_container_width=True,
         hide_index=True,
         column_config={
             "Current Price": st.column_config.NumberColumn("Current Price", format="₹%.2f"),
-            "Current Return %": st.column_config.NumberColumn("Current Return %", format="%.2f%%"),
+            "Current Return %": st.column_config.NumberColumn("Current Returns", format="%.2f%%"),
             "Estimated Price": st.column_config.NumberColumn("Estimated Price", format="₹%.2f"),
-            "Estimated Return %": st.column_config.NumberColumn("Estimated Return %", format="%.2f%%"),
+            "Estimated Return %": st.column_config.NumberColumn("Estimated Returns", format="%.2f%%"),
             "Open": st.column_config.NumberColumn("Open", format="₹%.2f"),
             "Close": st.column_config.NumberColumn("Close", format="₹%.2f"),
             "High": st.column_config.NumberColumn("High", format="₹%.2f"),
             "Low": st.column_config.NumberColumn("Low", format="₹%.2f"),
             "Confidence": st.column_config.NumberColumn("Confidence", format="%d%%"),
+            "Signal": st.column_config.TextColumn("Signal"),
         },
     )
-    st.markdown('<div class="small-note">Open/High/Low are the current trading-day values when supplied by Yahoo Finance. Close is the previous official close. When the market is closed, the current price reflects the latest available market price.</div>', unsafe_allow_html=True)
-
 
 def analysis_page():
     st.markdown('<div class="brand">SMA</div><div class="page-title">Stock analysis</div><div class="page-sub">Search one stock — only that stock is shown here. No giant NSE/BSE list.</div>', unsafe_allow_html=True)
