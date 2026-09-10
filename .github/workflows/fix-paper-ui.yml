@@ -12,90 +12,36 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Patch all stocks signal and confidence UI
+      - name: Fix mobile visibility and controls
         run: |
           python - <<'PY'
           from pathlib import Path
           p = Path('app.py')
           s = p.read_text()
-          old = '''    c1, c2, c3 = st.columns([2.2, 1, 1])
-    with c1:
-        query = st.text_input("Search", placeholder="Search symbol or company", label_visibility="collapsed", key="all_search")
-    with c2:
-        exchange = st.selectbox("Exchange", ["All", "NSE", "BSE"], label_visibility="collapsed", key="all_exchange")
-    with c3:
-        sort_by = st.selectbox("Sort", ["Symbol", "Current Price", "Confidence", "Estimated Price"], label_visibility="collapsed", key="all_sort")
+          marker = '/* Mobile responsive layout */'
+          if marker not in s:
+              raise SystemExit('Mobile CSS marker not found')
+          css = '''
+/* Paper Trading / Streamlit mobile visibility fixes */
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] * { color:#171717 !important; opacity:1 !important; }
+[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * { color:#77736d !important; opacity:1 !important; }
+[data-testid="stMetricDelta"], [data-testid="stMetricDelta"] * { opacity:1 !important; }
+.stButton > button { color:#171717 !important; background:#ffffff !important; border:1px solid #e9e3da !important; }
+.stButton > button[kind="primary"], .stButton > button[data-testid="baseButton-primary"] { color:#ffffff !important; background:#171717 !important; border-color:#171717 !important; }
+.stTextInput input, .stNumberInput input, [data-baseweb="select"] { color:#171717 !important; background:#ffffff !important; }
+.stTextInput input::placeholder { color:#77736d !important; opacity:1 !important; }
+.bottom-nav label { color:#171717 !important; }
+.bottom-nav label:has(input:checked) { color:#ffffff !important; background:#171717 !important; }
+@media (max-width:430px) {
+  .block-container { padding:12px 10px 100px !important; }
+  [data-testid="stHorizontalBlock"] { gap:8px !important; }
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { min-width:100% !important; width:100% !important; flex:1 1 100% !important; }
+  [data-testid="stMetricValue"] { font-size:20px !important; }
+  .stButton > button { min-height:42px !important; }
+}
 '''
-          new = '''    c1, c2, c3 = st.columns([2.2, 1, 1])
-    with c1:
-        query = st.text_input("Search", placeholder="Search stocks, indices, ETFs…", label_visibility="collapsed", key="all_search")
-    with c2:
-        exchange = st.selectbox("Exchange", ["All", "NSE", "BSE"], label_visibility="collapsed", key="all_exchange")
-    with c3:
-        sort_by = st.selectbox("Sort", ["Symbol", "Current Price", "Current Return %", "Estimated Price", "Estimated Return %", "Signal", "Confidence"], label_visibility="collapsed", key="all_sort")
-
-    with st.expander("Filters", expanded=False):
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            signal_filter = st.selectbox("Signal", ["Any", "BUY", "HOLD", "SELL"], key="all_signal_filter")
-        with f2:
-            confidence_filter = st.selectbox("Confidence", ["Any", "80%+", "70%+", "60%+", "Below 60%"], key="all_conf_filter")
-        with f3:
-            return_filter = st.selectbox("Current Returns", ["Any", "Positive", "Negative"], key="all_return_filter")
-'''
-          if old not in s:
-              raise SystemExit('All Stocks controls not found')
-          s = s.replace(old, new, 1)
-
-          old_sort = '''    table = pd.DataFrame(rows)
-    if sort_by == "Current Price": table = table.sort_values("Current Price", na_position="last", ascending=False)
-    elif sort_by == "Confidence": table = table.sort_values("Confidence", na_position="last", ascending=False)
-    elif sort_by == "Estimated Price": table = table.sort_values("Estimated Price", na_position="last", ascending=False)
-'''
-          new_sort = '''    table = pd.DataFrame(rows)
-    if return_filter == "Positive": table = table[table["Current Return %"] > 0]
-    elif return_filter == "Negative": table = table[table["Current Return %"] < 0]
-    if signal_filter != "Any": table = table[table["Signal"] == signal_filter]
-    if confidence_filter != "Any":
-        if confidence_filter == "80%+": table = table[table["Confidence"] >= 80]
-        elif confidence_filter == "70%+": table = table[table["Confidence"] >= 70]
-        elif confidence_filter == "60%+": table = table[table["Confidence"] >= 60]
-        else: table = table[table["Confidence"] < 60]
-    if sort_by == "Current Price": table = table.sort_values("Current Price", na_position="last", ascending=False)
-    elif sort_by == "Current Return %": table = table.sort_values("Current Return %", na_position="last", ascending=False)
-    elif sort_by == "Confidence": table = table.sort_values("Confidence", na_position="last", ascending=False)
-    elif sort_by == "Estimated Price": table = table.sort_values("Estimated Price", na_position="last", ascending=False)
-    elif sort_by == "Estimated Return %": table = table.sort_values("Estimated Return %", na_position="last", ascending=False)
-    elif sort_by == "Signal": table = table.sort_values("Signal", na_position="last")
-'''
-          if old_sort not in s:
-              raise SystemExit('All Stocks sort block not found')
-          s = s.replace(old_sort, new_sort, 1)
-
-          old_config = '''            "Confidence": st.column_config.NumberColumn("Confidence", format="%d%%"),
-            "Signal": st.column_config.TextColumn("Signal"),
-'''
-          new_config = '''            "Confidence": st.column_config.NumberColumn("Confidence", format="%d%%"),
-            "Signal": st.column_config.TextColumn("Signal"),
-'''
-          # Signal and confidence are already present; keep them and only add explicit styling below.
-          if old_config not in s:
-              raise SystemExit('Signal/confidence columns not found')
-
-          style_marker = '''    st.dataframe(
-        table,
-'''
-          style_insert = '''    st.markdown("""
-    <style>
-      [data-testid="stDataFrame"] { border-radius:18px; overflow:hidden; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.dataframe(
-        table,
-'''
-          if style_marker in s and 'border-radius:18px' not in s:
-              s = s.replace(style_marker, style_insert, 1)
+          if 'Paper Trading / Streamlit mobile visibility fixes' not in s:
+              s = s.replace(marker, css + '\n' + marker, 1)
           p.write_text(s)
           PY
       - name: Validate
@@ -105,5 +51,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py
-          git diff --cached --quiet || git commit -m 'Add signal confidence filters to all stocks'
+          git diff --cached --quiet || git commit -m 'Fix paper trading mobile visibility'
           git push
