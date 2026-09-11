@@ -601,6 +601,54 @@ def home_page():
     st.markdown(f'<div class="small-note" style="margin-top:18px">Market status: <b>{status}</b> · Data shown is {"live while the market is open" if market_open else "the latest completed market-close data"}.</div>', unsafe_allow_html=True)
 
 
+def make_all_stocks_pdf(table):
+    """Create a landscape PDF containing the complete currently displayed stock table."""
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A3, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A3), leftMargin=8*mm, rightMargin=8*mm,
+        topMargin=8*mm, bottomMargin=8*mm,
+    )
+    styles = getSampleStyleSheet()
+    title = Paragraph('<b>SMA — All Stocks</b>', styles['Title'])
+    data = [list(table.columns)]
+    for row in table.itertuples(index=False, name=None):
+        values = []
+        for value in row:
+            if pd.isna(value):
+                values.append('—')
+            elif isinstance(value, float):
+                values.append(f'{value:.2f}')
+            else:
+                values.append(str(value))
+        data.append(values)
+
+    usable_width = landscape(A3)[0] - 16*mm
+    col_widths = [usable_width / max(1, len(data[0]))] * len(data[0])
+    pdf_table = Table(data, repeatRows=1, colWidths=col_widths, splitByRow=1)
+    pdf_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#b88722')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 6),
+        ('LEADING', (0,0), (-1,-1), 7),
+        ('GRID', (0,0), (-1,-1), 0.25, colors.HexColor('#d8d8d8')),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('LEFTPADDING', (0,0), (-1,-1), 2),
+        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+    ]))
+    doc.build([title, Spacer(1, 4*mm), Paragraph(f'Complete table: {len(table):,} stocks', styles['Normal']), Spacer(1, 3*mm), pdf_table])
+    return buf.getvalue()
+
+
 def all_stocks_page():
     st.markdown('<div class="brand">SMA</div><div class="page-title">All stocks</div><div class="page-sub">Live NSE + BSE stock screener with returns, estimated returns, signal and confidence.</div>', unsafe_allow_html=True)
 
@@ -741,6 +789,14 @@ def all_stocks_page():
         table = table.sort_values("Confidence", na_position="last", ascending=False)
 
     st.markdown(f'<div class="small-note">Showing all {len(table):,} matching stocks — scroll the table to browse.</div>', unsafe_allow_html=True)
+    st.download_button(
+        label="Download Full Table PDF",
+        data=make_all_stocks_pdf(table),
+        file_name="SMA_All_Stocks.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
+
     st.dataframe(
         table,
         use_container_width=True,
