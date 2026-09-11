@@ -17,15 +17,28 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           p = Path('app.py')
           text = p.read_text(encoding='utf-8')
-          old = '''    page_size = 60\n    total_pages = max(1, math.ceil(len(df) / page_size))\n    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="all_page")\n    start_i = (page - 1) * page_size\n    page_df = df.iloc[start_i:start_i + page_size]\n'''
-          new = '''    # Show the complete filtered universe in one scrollable table; no pagination.\n    page_df = df\n'''
-          if old not in text:
-              raise SystemExit('Pagination block not found')
-          text = text.replace(old, new, 1)
-          text = text.replace('st.markdown(f'<div class="small-note">Showing {len(table):,} matching stocks on this page.</div>', unsafe_allow_html=True)', 'st.markdown(f'<div class="small-note">Showing all {len(table):,} matching stocks — scroll the table to browse.</div>', unsafe_allow_html=True)', 1)
-          p.write_text(text, encoding='utf-8')
+
+          # Replace any existing pagination block between page_size and page_df.
+          pattern = r'(?ms)^    page_size\s*=\s*60\s*\n.*?^    page_df\s*=\s*df\.iloc\[start_i:start_i \+ page_size\]\s*\n'
+          replacement = '    # Show the complete filtered universe in one scrollable table; no pagination.\n    page_df = df\n'
+          new_text, count = re.subn(pattern, replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('All Stocks pagination block not found')
+
+          # Remove any leftover Page number input if present.
+          new_text = re.sub(r'^    page\s*=\s*st\.number_input\("Page".*?\n', '', new_text, flags=re.M)
+          new_text = new_text.replace(
+              'Live OHLC data is loaded page-by-page to avoid rate limits.',
+              'Live OHLC data is loaded for the complete stock list.'
+          )
+          new_text = new_text.replace(
+              'Showing {len(table):,} matching stocks on this page.',
+              'Showing all {len(table):,} matching stocks — scroll the table to browse.'
+          )
+          p.write_text(new_text, encoding='utf-8')
           PY
           python -m py_compile app.py
       - name: Commit
@@ -33,5 +46,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py
-          git commit -m 'Show all stocks on one page'
+          git diff --cached --quiet && exit 0
+          git commit -m 'Show all stocks on one page without pagination'
           git push
