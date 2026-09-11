@@ -654,17 +654,13 @@ def all_stocks_page():
             | df.company.astype(str).str.lower().str.contains(q, regex=False, na=False)
         ]
 
-    st.markdown(f'<div class="small-note">{len(df):,} stocks in this view · Live OHLC data is loaded page-by-page to avoid rate limits.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="small-note">{len(df):,} stocks in this view · Live OHLC data is loaded for the complete stock list.</div>', unsafe_allow_html=True)
     if df.empty:
         st.info("No stocks match your search.")
         return
 
-    page_size = 60
-    total_pages = max(1, math.ceil(len(df) / page_size))
-    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="all_page")
-    start_i = (page - 1) * page_size
-    page_df = df.iloc[start_i:start_i + page_size]
-
+    # Show the complete filtered universe in one scrollable table; no pagination.
+    page_df = df
     rows = []
     progress = st.progress(0, text=f"Loading live prices… 0/{len(page_df)}")
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -744,7 +740,7 @@ def all_stocks_page():
     elif sort_by == "Confidence":
         table = table.sort_values("Confidence", na_position="last", ascending=False)
 
-    st.markdown(f'<div class="small-note">Showing {len(table):,} matching stocks on this page.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="small-note">Showing all {len(table):,} matching stocks — scroll the table to browse.</div>', unsafe_allow_html=True)
     st.dataframe(
         table,
         use_container_width=True,
