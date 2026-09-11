@@ -44,6 +44,67 @@ jobs:
               s = s.replace(marker, css + '\n' + marker, 1)
           p.write_text(s)
           PY
+      - name: Fix All Stocks PDF export order
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+          start = s.find('def make_all_stocks_pdf(')
+          end = s.find('\ndef all_stocks_page(', start)
+          if start < 0 or end < 0:
+              raise SystemExit('PDF helper boundary not found')
+          new = '''def make_all_stocks_pdf(table):
+    """Export the exact server-side table order; never re-sort rows for PDF."""
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A3, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+
+    # Copy only; preserve every row in exactly the order supplied by all_stocks_page.
+    export_table = table.copy().reset_index(drop=True)
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A3), leftMargin=8*mm, rightMargin=8*mm,
+        topMargin=8*mm, bottomMargin=8*mm,
+    )
+    styles = getSampleStyleSheet()
+    title = Paragraph('<b>SMA — All Stocks</b>', styles['Title'])
+    data = [list(export_table.columns)]
+    for row in export_table.itertuples(index=False, name=None):
+        values = []
+        for value in row:
+            if pd.isna(value):
+                values.append('—')
+            elif isinstance(value, float):
+                values.append(f'{value:.2f}')
+            else:
+                values.append(str(value))
+        data.append(values)
+
+    usable_width = landscape(A3)[0] - 16*mm
+    col_widths = [usable_width / max(1, len(data[0]))] * len(data[0])
+    pdf_table = Table(data, repeatRows=1, colWidths=col_widths, splitByRow=1)
+    pdf_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#b88722')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 6),
+        ('LEADING', (0,0), (-1,-1), 7),
+        ('GRID', (0,0), (-1,-1), 0.25, colors.HexColor('#d8d8d8')),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('LEFTPADDING', (0,0), (-1,-1), 2),
+        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+    ]))
+    doc.build([title, Spacer(1, 4*mm), Paragraph(f'Complete table: {len(export_table):,} stocks', styles['Normal']), Spacer(1, 3*mm), pdf_table])
+    return buf.getvalue()
+'''
+          p.write_text(s[:start] + new + s[end:])
+          PY
       - name: Validate
         run: python -m py_compile app.py modules/paper_trading.py
       - name: Commit
@@ -51,5 +112,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py
-          git diff --cached --quiet || git commit -m 'Fix paper trading mobile visibility'
+          git diff --cached --quiet || git commit -m 'Fix All Stocks PDF export order'
           git push
