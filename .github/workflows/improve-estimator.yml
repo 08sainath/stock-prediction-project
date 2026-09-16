@@ -1,0 +1,109 @@
+name: Improve SMA estimator
+
+on:
+  push:
+    paths:
+      - '.github/workflows/improve-estimator.yml'
+
+jobs:
+  improve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Improve estimate model
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+          start = s.find('def estimate_signal(')
+          end = s.find('\n\n@st.cache_data(ttl=120, show_spinner=False)\ndef stock_snapshot(', start)
+          if start < 0 or end < 0:
+              raise SystemExit('estimate_signal boundaries not found')
+          new = '''def estimate_signal(current, hist):
+    """Estimate near-term price using a calibrated blend of live return and technical trend.
+
+    The displayed Estimated Return is intentionally anchored to the current session return,
+    while historical momentum/trend only nudges the estimate. This prevents the old model
+    from producing large estimates that are disconnected from the live market move.
+    """
+    if current is None:
+        return None, None, None, []
+    if hist.empty or len(hist) < 20:
+        estimated = current
+        return estimated, "HOLD", 50, ["Not enough recent history for a stronger technical estimate."]
+
+    h = technicals(hist).dropna(subset=["close"])
+    if h.empty:
+        return current, "HOLD", 50, ["Historical data is unavailable for a stronger estimate."]
+
+    last = h.iloc[-1]
+    sma20 = num(last.get("sma20"))
+    sma50 = num(last.get("sma50"))
+    rsi = num(last.get("rsi"))
+
+    # Use the latest completed-session close as the comparison baseline.
+    previous_close = num(h["close"].iloc[-1])
+    live_return = ((current / previous_close) - 1) * 100 if previous_close not in (None, 0) else 0.0
+
+    momentum5 = 0.0
+    if len(h) >= 6 and num(h["close"].iloc[-6]) not in (None, 0):
+        momentum5 = ((current / h["close"].iloc[-6]) - 1) * 100
+
+    momentum20 = 0.0
+    if len(h) >= 21 and num(h["close"].iloc[-21]) not in (None, 0):
+        momentum20 = ((current / h["close"].iloc[-21]) - 1) * 100
+
+    trend = ((sma20 / sma50) - 1) * 100 if sma20 and sma50 else 0.0
+
+    # Technical component is deliberately small: the live return remains the anchor.
+    technical_bias = 0.50 * momentum5 + 0.30 * momentum20 + 0.20 * trend
+    technical_bias = float(np.clip(technical_bias, -6.0, 6.0))
+
+    # 80% current return + 20% technical bias gives a stable, close-to-live estimate.
+    expected_change = float(np.clip(0.80 * live_return + 0.20 * technical_bias, -15.0, 15.0))
+    estimated = current * (1 + expected_change / 100.0)
+
+    reasons = [f"Live session return is {live_return:+.2f}%; estimate is anchored to this move."]
+    reasons.append(f"Technical bias from short/medium momentum and trend is {technical_bias:+.2f}%.")
+    if sma20 and sma50:
+        reasons.append("SMA20 is above SMA50, supporting the trend." if sma20 > sma50 else "SMA20 is below SMA50, showing weaker trend structure.")
+    if rsi is not None:
+        if rsi >= 70:
+            reasons.append(f"RSI is high at {rsi:.1f}; upside may be stretched.")
+        elif rsi <= 30:
+            reasons.append(f"RSI is low at {rsi:.1f}; the stock is technically oversold.")
+        else:
+            reasons.append(f"RSI is {rsi:.1f}, inside a neutral zone.")
+
+    if expected_change >= 3 and (rsi is None or rsi < 72):
+        signal = "BUY"
+    elif expected_change <= -3 or (rsi is not None and rsi > 78):
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+
+    # Confidence reflects agreement between live move and technical direction,
+    # rather than simply becoming high because the estimated move is large.
+    agreement = 1.0 if live_return * technical_bias >= 0 else 0.0
+    confidence = int(np.clip(60 + abs(live_return) * 2.0 + agreement * 8.0, 60, 92))
+    return estimated, signal, confidence, reasons
+'''
+          p.write_text(s[:start] + new + s[end:])
+          PY
+
+      - name: Validate
+        run: python -m py_compile app.py modules/paper_trading.py
+
+      - name: Commit app change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git diff --cached --quiet || git commit -m 'Improve estimated returns calibration'
+          git push
