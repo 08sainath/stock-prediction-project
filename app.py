@@ -1,6 +1,6 @@
 # SMA runtime launcher
-# The original app is pinned to the previous blob so this launcher can safely
-# apply the market-session logic without changing the existing UI/pages.
+# Loads the known-good SMA app from a commit ref, then applies the market-session
+# estimator patch in memory. Using a commit SHA (not a blob SHA) keeps the raw URL valid.
 import re
 import urllib.request
 from datetime import datetime, time as dt_time
@@ -8,10 +8,8 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
-SOURCE_URL = "https://raw.githubusercontent.com/08sainath/stock-prediction-project/a5c9f263c97b16779e5e611fcbad1a6862e8177b/app.py"
+SOURCE_URL = "https://raw.githubusercontent.com/08sainath/stock-prediction-project/3b96ac43c76c6b3a910fb258b0f4c025acb7f9b9/app.py"
 
-# Refresh the Streamlit session every minute while the Indian market is open.
-# The date-keyed morning cache below guarantees a fresh analysis each trading day.
 try:
     from streamlit_autorefresh import st_autorefresh
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -22,9 +20,6 @@ except Exception:
 
 source = urllib.request.urlopen(SOURCE_URL, timeout=20).read().decode("utf-8")
 
-# Replace the old estimator with a session-aware estimator.  The morning
-# analysis is the model baseline; from 10:00 onward the target is recalculated
-# from the live price using that baseline's technical bias.
 new_estimator = r'''def estimate_signal(current, hist, current_return_pct=None, technical_override=None):
     if current is None:
         return None, None, None, []
@@ -35,14 +30,9 @@ new_estimator = r'''def estimate_signal(current, hist, current_return_pct=None, 
         estimated = current * (1 + expected_change / 100)
         signal = "BUY" if technical_change >= 1.5 else ("SELL" if technical_change <= -1.5 else "HOLD")
         confidence = int(np.clip(58 + abs(technical_change) * 4, 58, 92))
-        return estimated, signal, confidence, [
-            f"Morning technical bias: {technical_change:+.2f}%.",
-            "Live price is refreshed during the market session.",
-            "Estimated price uses the morning analysis as the intraday baseline."
-        ]
+        return estimated, signal, confidence, [f"Morning technical bias: {technical_change:+.2f}%.", "Live price is refreshed during the market session.", "Estimated price uses the morning analysis as the intraday baseline."]
     if hist.empty or len(hist) < 20:
-        estimated = current
-        return estimated, "HOLD", 50, ["Not enough recent history for a stronger technical estimate."]
+        return current, "HOLD", 50, ["Not enough recent history for a stronger technical estimate."]
     h = technicals(hist)
     last = h.iloc[-1]
     sma20 = num(last.get("sma20")); sma50 = num(last.get("sma50")); rsi = num(last.get("rsi"))
@@ -53,38 +43,21 @@ new_estimator = r'''def estimate_signal(current, hist, current_return_pct=None, 
     live_return = num(current_return_pct)
     expected_change = float(np.clip(live_return + 0.20 * technical_change, -15, 15)) if live_return is not None else technical_change
     estimated = current * (1 + expected_change / 100)
-
-    reasons = []
-    if momentum5 > 1: reasons.append(f"5-day momentum is positive ({momentum5:+.2f}%).")
-    elif momentum5 < -1: reasons.append(f"5-day momentum is negative ({momentum5:+.2f}%).")
-    else: reasons.append(f"5-day momentum is relatively flat ({momentum5:+.2f}%).")
-    if momentum20 > 1: reasons.append(f"20-day momentum is positive ({momentum20:+.2f}%).")
-    elif momentum20 < -1: reasons.append(f"20-day momentum is negative ({momentum20:+.2f}%).")
+    reasons = [f"5-day momentum: {momentum5:+.2f}%.", f"20-day momentum: {momentum20:+.2f}%."]
     if sma20 and sma50:
         reasons.append("SMA20 is above SMA50, supporting the trend." if sma20 > sma50 else "SMA20 is below SMA50, showing weaker trend structure.")
     if rsi is not None:
-        if rsi >= 70: reasons.append(f"RSI is high at {rsi:.1f}; upside may be stretched.")
-        elif rsi <= 30: reasons.append(f"RSI is low at {rsi:.1f}; the stock is technically oversold.")
-        else: reasons.append(f"RSI is {rsi:.1f}, inside a neutral zone.")
-
+        reasons.append(f"RSI is {rsi:.1f}.")
     signal = "BUY" if technical_change >= 1.5 and (rsi is None or rsi < 72) else ("SELL" if technical_change <= -1.5 or (rsi is not None and rsi > 78) else "HOLD")
     confidence = int(np.clip(58 + abs(technical_change) * 4 + min(8, len(h) / 40), 58, 92))
     return estimated, signal, confidence, reasons
 '''
-
-source = re.sub(
-    r"def estimate_signal\(current, hist\):.*?(?=\n\n@st\.cache_data\(ttl=120, show_spinner=False\)\ndef stock_snapshot)",
-    new_estimator,
-    source,
-    count=1,
-    flags=re.S,
-)
+source = re.sub(r"def estimate_signal\(current, hist\):.*?(?=\n\n@st\.cache_data\(ttl=120, show_spinner=False\)\ndef stock_snapshot)", new_estimator, source, count=1, flags=re.S)
 
 new_snapshot = r'''MARKET_TZ = ZoneInfo("Asia/Kolkata")
 ANALYSIS_START = dt_time(9, 0)
 ESTIMATE_START = dt_time(10, 0)
 MARKET_CLOSE = dt_time(15, 30)
-
 
 def _market_phase(now):
     if now.weekday() >= 5:
@@ -96,7 +69,6 @@ def _market_phase(now):
         return "estimate"
     return "closed"
 
-
 @st.cache_data(ttl=86400, show_spinner=False)
 def morning_analysis(ticker, session_date):
     q = yahoo_chart(ticker, "1d", "1m") or yahoo_chart(ticker, "5d", "1d")
@@ -105,28 +77,17 @@ def morning_analysis(ticker, session_date):
         return None
     estimated, signal, confidence, reasons = estimate_signal(q["price"], hist, q.get("change_pct"))
     technical_bias = ((estimated / q["price"]) - 1) * 100 if estimated is not None and q.get("price") else 0.0
-    return {
-        "analysis_price": q.get("price"),
-        "morning_return": q.get("change_pct"),
-        "technical_bias": float(np.clip(technical_bias, -6, 6)),
-        "signal": signal,
-        "confidence": confidence,
-        "reasons": reasons,
-        "session_date": session_date,
-    }
-
+    return {"analysis_price": q.get("price"), "morning_return": q.get("change_pct"), "technical_bias": float(np.clip(technical_bias, -6, 6)), "signal": signal, "confidence": confidence, "reasons": reasons, "session_date": session_date}
 
 @st.cache_data(ttl=20, show_spinner=False)
 def _live_market_quote(ticker):
     return yahoo_chart(ticker, "1d", "1m") or yahoo_chart(ticker, "5d", "1d")
-
 
 @st.cache_data(ttl=120, show_spinner=False)
 def stock_snapshot(ticker):
     now = datetime.now(MARKET_TZ)
     phase = _market_phase(now)
     session_date = now.date().isoformat()
-
     if phase in ("analysis", "estimate"):
         q = _live_market_quote(ticker)
     else:
@@ -140,51 +101,18 @@ def stock_snapshot(ticker):
                 q["change_pct"] = (q["change"] / q["close"] * 100) if q["change"] is not None and q["close"] not in (None, 0) else None
     if not q:
         return None
-
     hist = historical(ticker)
     morning = morning_analysis(ticker, session_date) if phase in ("analysis", "estimate") else None
-
     if phase == "estimate" and morning:
-        # 10:00–15:00: live price moves every refresh, while the technical
-        # analysis remains frozen to that day's morning analysis.
-        estimated, signal, confidence, reasons = estimate_signal(
-            q["price"], hist, q.get("change_pct"), morning.get("technical_bias")
-        )
+        estimated, signal, confidence, reasons = estimate_signal(q["price"], hist, q.get("change_pct"), morning.get("technical_bias"))
     elif phase == "analysis" and morning:
         estimated = morning.get("analysis_price") * (1 + morning.get("technical_bias", 0) / 100) if morning.get("analysis_price") else q.get("price")
         signal, confidence, reasons = morning.get("signal"), morning.get("confidence"), morning.get("reasons", [])
     else:
         estimated, signal, confidence, reasons = estimate_signal(q["price"], hist, q.get("change_pct"))
-
     latest = technicals(hist).iloc[-1] if not hist.empty else pd.Series(dtype=float)
-    return {
-        **q,
-        "estimated": estimated,
-        "signal": signal,
-        "confidence": confidence,
-        "reasons": reasons,
-        "session_phase": phase,
-        "analysis_date": session_date,
-        "analysis_window": "09:00–10:00 IST" if phase in ("analysis", "estimate") else "Last completed session",
-        "estimate_window": "10:00–15:00 IST" if phase == "estimate" else "Next market session",
-        "sma20": num(latest.get("sma20")) if not latest.empty else None,
-        "sma50": num(latest.get("sma50")) if not latest.empty else None,
-        "rsi": num(latest.get("rsi")) if not latest.empty else None,
-    }
+    return {**q, "estimated": estimated, "signal": signal, "confidence": confidence, "reasons": reasons, "session_phase": phase, "analysis_date": session_date, "analysis_window": "09:00–10:00 IST" if phase in ("analysis", "estimate") else "Last completed session", "estimate_window": "10:00–15:00 IST" if phase == "estimate" else "Next market session", "sma20": num(latest.get("sma20")) if not latest.empty else None, "sma50": num(latest.get("sma50")) if not latest.empty else None, "rsi": num(latest.get("rsi")) if not latest.empty else None}
 '''
-
-source = re.sub(
-    r"@st\.cache_data\(ttl=120, show_spinner=False\)\ndef stock_snapshot\(ticker\):.*?(?=\n\n# ============================================================\n# Market index quotes)",
-    new_snapshot,
-    source,
-    count=1,
-    flags=re.S,
-)
-
-# Make the existing explanatory note accurate for the new two-stage workflow.
-source = source.replace(
-    "The estimated price, signal and confidence are calculated by SMA from recent price momentum and moving-average/RSI indicators. They are estimates, not investment guarantees.",
-    "SMA runs the daily technical analysis from 09:00–10:00 IST, then refreshes live prices and recalculates the estimated price from 10:00–15:00 IST using that morning baseline. Estimates are not investment guarantees."
-)
-
+source = re.sub(r"@st\.cache_data\(ttl=120, show_spinner=False\)\ndef stock_snapshot\(ticker\):.*?(?=\n\n# ============================================================\n# Market index quotes)", new_snapshot, source, count=1, flags=re.S)
+source = source.replace("The estimated price, signal and confidence are calculated by SMA from recent price momentum and moving-average/RSI indicators. They are estimates, not investment guarantees.", "SMA runs daily analysis from 09:00–10:00 IST, then refreshes live prices and estimates from 10:00–15:00 IST using that morning baseline. Estimates are not investment guarantees.")
 exec(compile(source, SOURCE_URL, "exec"), globals(), globals())
